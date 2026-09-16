@@ -89,7 +89,7 @@ void ModelCoulomb::initialize_Potential(const std::string& file_path__, const in
     Potential_.fill(0.0);
     for (int iRCoulomb=0; iRCoulomb<R_MeshGrid.get_TotalSize(); iRCoulomb++) {
         if ( Rgrid_->mpindex.is_local( ci(iRCoulomb,0) ) ) {
-            auto iR_local = Rgrid_->mpindex.glob1D_to_loc1D( ci(iRCoulomb,0) );
+            auto iR_local = int(Rgrid_->mpindex.glob1D_to_loc1D( ci(iRCoulomb,0) ));
             for (int irow=0; irow<nbnd__; irow++) {
                 for (int icol=0; icol<nbnd__; icol++) {
                     int iline = nbnd__*2*irow + 2*icol + (std::pow(nbnd__,2)*2+1)*iRCoulomb + 1;
