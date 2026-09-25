@@ -34,18 +34,18 @@ class MPIindex
         void initialize( const std::array<int, 3>& ValuesToSplit__, const int& howmany__=1);
         void initialize( const std::array<int, 2>& ValuesToSplit__ );
         
-        inline std::ptrdiff_t glob1D_to_loc1D(const std::ptrdiff_t& global);
-        inline std::ptrdiff_t loc1D_to_glob1D(const std::ptrdiff_t& local);
+        inline std::ptrdiff_t glob1D_to_loc1D(const std::ptrdiff_t& global) const;
+        inline std::ptrdiff_t loc1D_to_glob1D(const std::ptrdiff_t& local) const;
 
         template<typename... Args>
-        inline std::ptrdiff_t globnD_to_glob1D(const Args&... args);
+        inline std::ptrdiff_t globnD_to_glob1D (const Args&... args) const;
 
         template<typename... Args>
-        inline std::ptrdiff_t globnD_to_loc1D(const Args&... args);
+        inline std::ptrdiff_t globnD_to_loc1D (const Args&... args) const;
 
-        inline std::array<int, dim> loc1D_to_globnD(const std::ptrdiff_t& loc1D);
+        inline std::array<int, dim> loc1D_to_globnD (const std::ptrdiff_t& loc1D) const;
 
-        inline std::array<int, dim> glob1D_to_globnD(const std::ptrdiff_t& glob1D);
+        inline std::array<int, dim> glob1D_to_globnD (const std::ptrdiff_t& glob1D) const;
 
         inline int get_RecommendedAllocate_fftw() const;
 

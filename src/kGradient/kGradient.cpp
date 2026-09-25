@@ -26,6 +26,10 @@ void kGradient::initialize()
 {
     //evaluates weights, number of shells, k+b indices.
     if(kmesh && !Rmesh) {
+        // the neighbours k+b are taken with their global index, so the whole grid must be on one rank
+        if( mpi::Communicator::world().size() > 1 ) {
+            throw std::runtime_error("kGradient: the gradient in k space (gradient_space = \"k\") works only with 1 MPI rank, use gradient_space = \"R\"\n");
+        }
         mpindex.initialize(kmesh->get_Size());
         ikshell = SortInShells(*kmesh);
         Calculate_nshellsAndweights(nshells, Weight, *kmesh, ikshell);
@@ -36,7 +40,7 @@ void kGradient::initialize()
         mpindex.initialize(Rmesh->get_Size());
     }
     else {
-        std::runtime_error("Something went wrong in kGradient::initialize() -> either both or none Rmesh and kmesh are initialized\n");
+        throw std::runtime_error("Something went wrong in kGradient::initialize() -> either both or none Rmesh and kmesh are initialized\n");
     }
 }
 

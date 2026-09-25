@@ -123,8 +123,12 @@ class BlockMatrix{
         void make_dagger();
 
         void cut(const double& threshold__);
-        void write_h5(const std::string& name__, const std::string& node__, const std::string& label__="");
-        void load    (const std::string& name__, const int& node__, const std::string& label__="");
+        /// Writes the matrix in the h5 file; the blocks of all the ranks of comm__ are gathered on its rank 0
+        void write_h5(const std::string& name__, const std::string& node__, const std::string& label__, 
+                      const mpi::Communicator& comm__);
+        /// Reads the matrix from the h5 file; rank 0 of comm__ reads and sends the blocks to the other ranks
+        void load    (const std::string& name__, const int& node__, const std::string& label__, 
+                      const mpi::Communicator& comm__);
         void identity()
         {
             this->fill(0.);

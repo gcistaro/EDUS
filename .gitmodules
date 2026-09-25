@@ -1,0 +1,3 @@
+[submodule "tb_models/ab_initio"]
+	path = tb_models/ab_initio
+	url = https://github.com/gcistaro/EDUS-models.git

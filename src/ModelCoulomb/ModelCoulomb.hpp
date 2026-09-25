@@ -39,16 +39,18 @@ class ModelCoulomb
         int spin_deg_;
     public:
         ModelCoulomb(){};
-        ModelCoulomb(const std::array<Operator<std::complex<double>>,3>& r__,
-                     const std::shared_ptr<MeshGrid>& MasterRGrid__, 
-                     const bool& read_interaction__,
-                     const std::string& file_path__, 
-                     const int spin_deg__);
-        void initialize(const std::array<Operator<std::complex<double>>,3>& r__,
-                        const std::shared_ptr<MeshGrid>& MasterRGrid__, 
-                        const bool& read_interaction__,
-                        const std::string& file_path__, 
-                        const int spin_deg__);
+        ModelCoulomb(const std::vector<Coordinate>& wannier_centers, 
+                     const std::shared_ptr<MeshGrid>& Rgrid, 
+                     const bool read_interaction, 
+                     const std::string& file_path, 
+                     const MPIindex<3>& mpindex, 
+                     const int spin_deg);
+        void initialize(const std::vector<Coordinate>& wannier_centers, 
+                     const std::shared_ptr<MeshGrid>& Rgrid, 
+                     const bool read_interaction, 
+                     const std::string& file_path, 
+                     const MPIindex<3>& mpindex, 
+                     const int spin_deg);
         void initialize_Potential(const std::vector<Coordinate>& wannier_centers__);
         void initialize_Potential(const std::string& file_path__, const int nbnd__);
         std::complex<double> Potentials_wrapper(const Coordinate& r__);
@@ -57,6 +59,8 @@ class ModelCoulomb
         void set_coulomb_model(const std::string& model_name__);
         std::array<double, 3>& get_r0();
         double get_r0_avg();
+        const std::array<double, 3>& r0() const { return Parameters_.r0; }
+        double r0_avg() const { return Parameters_.r0_avg; }
         /// The interaction: Potential_(iR, i, j)  = @f$ \langle i \textbf{0}, j \textbf{R}[iR] | V | i \textbf{0}, j \textbf{R}[iR] \rangle @f$
         mdarray<std::complex<double>,3> Potential_;
         mdarray<std::complex<double>,3>& get_Potential();
