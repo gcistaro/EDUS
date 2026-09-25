@@ -17,6 +17,7 @@
             "default": "femtoseconds",
             "enum": [
                 "femtoseconds",
+                "fs",
                 "autime"
             ],
             "title": "Units used for the decay rate of the density matrix"
@@ -31,6 +32,8 @@
             "default": "electronvolt",
             "enum": [
                 "electronvolt",
+                "joule",
+                "Rydberg",
                 "auenergy"
             ],
             "title": "Units used for the Fermi energy of the system"
@@ -56,6 +59,8 @@
             "default": "electronvolt",
             "enum": [
                 "electronvolt",
+                "joule",
+                "Rydberg",
                 "auenergy"
             ],
             "title": "Units used for the gap we want to open"
@@ -89,8 +94,10 @@
             "type": "string",
             "default": "angstrom",
             "enum": [
-                "aulength",
-                "angstrom"
+                "angstrom",
+                "nanometers",
+                "nm",
+                "aulength"
             ],
             "title": "Units for the Time resolution used for propagating Density Matrix"
         },
@@ -136,8 +143,9 @@
             "type": "string",
             "default": "autime",
             "enum": [
-                "autime",
-                "fs"
+                "femtoseconds",
+                "fs",
+                "autime"
             ],
             "title": "Units for the Time resolution used for propagating Density Matrix"
         },
@@ -160,8 +168,9 @@
             "type": "string",
             "default": "autime",
             "enum": [
-                "autime",
-                "fs"
+                "femtoseconds",
+                "fs",
+                "autime"
             ],
             "title": "Units for the Time resolution used for Initial time of the simulation"
         },
@@ -174,8 +183,9 @@
             "type": "string",
             "default": "autime",
             "enum": [
-                "autime",
-                "fs"
+                "femtoseconds",
+                "fs",
+                "autime"
             ],
             "title": "Units for the Time resolution used for Final time of the simulation"
         },
@@ -256,10 +266,10 @@
                     },
                     "intensity_units": {
                         "type": "string",
-                        "default": "Wcm2",
+                        "default": "wcm2",
                         "enum": [
-                            "Wcm2",
-                            "au"
+                            "wcm2",
+                            "auintensity"
                         ],
                         "title": "Units for intensity of the laser"
                     },
@@ -270,9 +280,11 @@
                     },
                     "frequency_units": {
                         "type": "string",
-                        "default": "eV",
+                        "default": "electronvolt",
                         "enum": [
-                            "eV",
+                            "electronvolt",
+                            "joule",
+                            "Rydberg",
                             "auenergy"
                         ],
                         "title": "Units for frequency of the laser"
@@ -286,8 +298,10 @@
                         "type": "string",
                         "default": "nm",
                         "enum": [
+                            "angstrom",
+                            "nanometers",
                             "nm",
-                            "au"
+                            "aulength"
                         ],
                         "title": "Units for wavelength of the laser"
                     },
@@ -308,8 +322,9 @@
                         "type": "string",
                         "default": "fs",
                         "enum": [
+                            "femtoseconds",
                             "fs",
-                            "au"
+                            "autime"
                         ],
                         "title": "Units for initial time of the laser"
                     },
@@ -337,10 +352,10 @@
                     },
                     "intensity_units": {
                         "type": "string",
-                        "default": "Wcm2",
+                        "default": "wcm2",
                         "enum": [
-                            "Wcm2",
-                            "au"
+                            "wcm2",
+                            "auintensity"
                         ],
                         "title": "Units for intensity of the laser"
                     },
@@ -351,9 +366,11 @@
                     },
                     "frequency_units": {
                         "type": "string",
-                        "default": "eV",
+                        "default": "electronvolt",
                         "enum": [
-                            "eV",
+                            "electronvolt",
+                            "joule",
+                            "Rydberg",
                             "auenergy"
                         ],
                         "title": "Units for frequency of the laser"
@@ -367,8 +384,10 @@
                         "type": "string",
                         "default": "nm",
                         "enum": [
+                            "angstrom",
+                            "nanometers",
                             "nm",
-                            "au"
+                            "aulength"
                         ],
                         "title": "Units for wavelength of the laser"
                     },
@@ -389,8 +408,9 @@
                         "type": "string",
                         "default": "fs",
                         "enum": [
+                            "femtoseconds",
                             "fs",
-                            "au"
+                            "autime"
                         ],
                         "title": "Units for initial time of the laser"
                     },
