@@ -107,7 +107,7 @@ bool OutputManager::is_print_step(const double& time__, const bool& use_sparse__
             }
         }
     }
-    return (int(round(time__ / propagator_->resolution_time())) % printresolution == 0);
+    return (int(round(time__ / propagator_->time_step())) % printresolution == 0);
 }
 
 void OutputManager::copy_DM_to_aux(const double& time__)

@@ -2,18 +2,13 @@
 #define PROPAGATOR_PARAMETERS_HPP
 
 #include "Constants.hpp"
+#include "DESolver/DESolverParameters.hpp"
 #include "InputVariables/config.hpp"
 
 struct PropagatorParameters
 {
-    /// Algorithm used to solve the differential equation (Runge-Kutta or Adams-Bashforth)
-    SolverType solver = SolverType::RK;
-    /// Order of the solver
-    int order = 4;
-    /// Initial time of the propagation (a.u.)
-    double initial_time = 0.;
-    /// Time step (a.u.)
-    double dt = 0.;
+    /// Solver of the differential equation: algorithm, order, initial time and time step
+    DESolverParameters desolver;
     /// If true, the laser enters through the Peierls phase instead of the gradient term
     bool peierls = false;
     /// Decay time of the density matrix towards equilibrium (a.u.). Ignored if ~0
@@ -29,10 +24,10 @@ public:
     static PropagatorParameters create(const config_t& cfg)
     {
         PropagatorParameters p;
-        p.solver = solver.at(cfg.solver());
-        p.order = cfg.order();
-        p.initial_time = cfg.initialtime();
-        p.dt = cfg.dt();
+        p.desolver.solver = solver.at(cfg.solver());
+        p.desolver.order = cfg.order();
+        p.desolver.initial_time = cfg.initialtime();
+        p.desolver.dt = cfg.dt();
         p.peierls = cfg.peierls();
         p.decay = cfg.decay();
         p.gradient_space = (cfg.gradient_space() == "R" ? Space::R : Space::k);

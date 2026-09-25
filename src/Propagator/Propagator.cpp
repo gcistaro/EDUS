@@ -36,27 +36,24 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         [this](Operator<std::complex<double>>& Output__, const double& time__, const Operator<std::complex<double>>& Input__) {
             source_term(Output__, time__, Input__);
         },
-        parameters_.solver,
-        parameters_.order);
-    desolver_.set_InitialTime(parameters_.initial_time);
-    desolver_.set_ResolutionTime(parameters_.dt);
-    desolver_.set_processor(processor_);
+        parameters_.desolver);
 }
 
 void Propagator::step()
 {
     state_->DensityMatrix().set_processor(processor_);
-    desolver_.Propagate();
+    desolver_.propagate();
 }
 
 void Propagator::print_recap() const
 {
     output::title("PROPAGATOR");
-    output::print("Solver                   *", std::string(8, ' '), (parameters_.solver == SolverType::RK ? "RK" : "AB"));
-    output::print("Order                    *", parameters_.order);
-    output::print("Resolution time          *", parameters_.dt, " a.u.", Convert(parameters_.dt, AuTime, FemtoSeconds), " fs");
-    output::print("Initial time             *", parameters_.initial_time, " a.u.", 
-                                                Convert(parameters_.initial_time, AuTime, FemtoSeconds), " fs");
+    auto& desolver = parameters_.desolver;
+    output::print("Solver                   *", std::string(8, ' '), (desolver.solver == SolverType::RK ? "RK" : "AB"));
+    output::print("Order                    *", desolver.order);
+    output::print("Resolution time          *", desolver.dt, " a.u.", Convert(desolver.dt, AuTime, FemtoSeconds), " fs");
+    output::print("Initial time             *", desolver.initial_time, " a.u.",
+                                                Convert(desolver.initial_time, AuTime, FemtoSeconds), " fs");
     output::print("Space for gradient       *", std::string(8, ' '), (parameters_.gradient_space == R ? "R" : "k"));
     output::print("Peierls                  *", std::string(8, ' '), (parameters_.peierls ? "True" : "False"));
     output::print("Decay                    *", parameters_.decay, " a.u.", Convert(parameters_.decay, AuTime, FemtoSeconds), " fs");
@@ -67,6 +64,7 @@ void Propagator::initialize_device()
 {
     bare_Rgrid_gamma_.initialize_device();
     bare_Rgrid_gamma_.transfer_to(Processor::device);
+    desolver_.initialize_device();
 }
 
 /// @brief Standard function defining the initial density matrix.

@@ -295,7 +295,7 @@ void Simulation::print_recap()
 void Simulation::Propagate()
 {
     PROFILE("Simulation::Propagate");
-    int iFinalTime = int((ctx_->cfg().finaltime() - ctx_->cfg().initialtime()) / propagator_.resolution_time()) + 2;
+    int iFinalTime = int((ctx_->cfg().finaltime() - ctx_->cfg().initialtime()) / propagator_.time_step()) + 2;
 
     /* print info on output */
     output::title("PROPAGATION");

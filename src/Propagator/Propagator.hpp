@@ -83,8 +83,8 @@ class Propagator
 
         /* getter methods */
         const PropagatorParameters& parameters() const { return parameters_; }
-        double current_time() const { return desolver_.get_CurrentTime(); }
-        double resolution_time() const { return desolver_.get_ResolutionTime(); }
+        double current_time() const { return desolver_.current_time(); }
+        double time_step() const { return desolver_.time_step(); }
         Processor processor() const { return processor_; }
 };
 
