@@ -148,6 +148,13 @@ jobs:
           cd build
           ctest -R "^LiF_HSEX$" --output-on-failure
 
+      - name: Run MoS2_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^MoS2_HSEX$" --output-on-failure
+
       - name: Run hBN_HSEX_np4 test
         env:
           MPIEXEC_FLAGS: --oversubscribe

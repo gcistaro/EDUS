@@ -351,6 +351,8 @@ add_test(NAME GaAs_IPA   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME GaAs_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_HSEX  2)
 add_test(NAME LiF_IPA    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_IPA    2)
 add_test(NAME LiF_HSEX   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX   2)
+# 2D, 34 bands with spin-orbit, Rytova-Keldysh interaction computed from the model
+add_test(NAME MoS2_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh MoS2_HSEX  2)
 # same tests with 4 ranks (for LiF the 9 planes of the grid are split unevenly among them)
 add_test(NAME hBN_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX 4)
 add_test(NAME LiF_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX 4)

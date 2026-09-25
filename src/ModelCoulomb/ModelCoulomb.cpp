@@ -44,9 +44,9 @@ void ModelCoulomb::initialize_Potential(const std::vector<Coordinate>& wannier_c
         auto& R = (*Rgrid_)[iR_global];
 
         for(int in=0; in<Potential_.get_Size(1); in++) {
-            auto r = wannier_centers__[in] - R;
             for(int im=0; im<Potential_.get_Size(2); im++){
-                r = r - wannier_centers__[im];
+                /* distance between the center of the wannier function in in the cell 0 and im in the cell R */
+                auto r = wannier_centers__[in] - R - wannier_centers__[im];
                 Potential_(iR_local, in, im) = double(spin_deg_)*Potentials_wrapper(r);
             }
         }
@@ -113,13 +113,17 @@ void ModelCoulomb::initialize(const std::vector<Coordinate>& wannier_centers__,
     Rgrid_ = Rgrid_gammaCentered__;
     auto nbnd = wannier_centers__.size();
 
-    /* find minimum (non-zero) distance between wannier centers */
+    /* find minimum distance between wannier centers on different sites. Centers closer than
+       same_site_distance (a.u.) are considered on the same site, e.g. spin partners or orbitals
+       of the same atom whose centers differ only by numerical noise: their interaction is
+       saturated at the minimum distance, like the on-site one */
+    const double same_site_distance = 0.1;
     min_distance_ = Coordinate(100,0,0,"Cartesian");
     min_distance_norm_ = min_distance_.norm();
     for(int in=0; in<nbnd; in++) {
         for(int im=in+1; im<nbnd; ++im) {
             auto distance = wannier_centers__[in]-wannier_centers__[im];
-            if( distance.norm() < min_distance_norm_ && distance.norm() > 1.e-05 ) {
+            if( distance.norm() < min_distance_norm_ && distance.norm() > same_site_distance ) {
                 min_distance_ = distance;
                 min_distance_norm_ = min_distance_.norm();
             }

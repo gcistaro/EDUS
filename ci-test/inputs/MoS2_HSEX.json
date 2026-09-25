@@ -1,0 +1,43 @@
+{
+    "tb_file": "../../tb_models/ab_initio/MoS2/MoS2_34bands_herm",
+    "fermienergy": 0,
+    "fermienergy_units": "electronvolt",
+    "coulomb": true,
+    "method": "hsex",
+    "coulomb_model": "rytova_keldysh",
+    "epsilon": 1.0,
+    "r0": [
+        35
+    ],
+    "grid": [
+        25,
+        25,
+        1
+    ],
+    "filledbands": 26,
+    "dt": 0.01,
+    "dt_units": "femtoseconds",
+    "printresolution": 1,
+    "printresolution_pulse": 1,
+    "initialtime": 0,
+    "initialtime_units": "femtoseconds",
+    "finaltime": 0.1,
+    "finaltime_units": "femtoseconds",
+    "lasers": [
+        {
+            "intensity": 10000000000.0,
+            "intensity_units": "wcm2",
+            "frequency": 6,
+            "frequency_units": "electronvolt",
+            "polarization": [
+                1,
+                0,
+                0
+            ],
+            "cycles": 1,
+            "phase": 0,
+            "t0": 0.0,
+            "t0_units": "femtoseconds"
+        }
+    ]
+}
