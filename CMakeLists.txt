@@ -343,6 +343,8 @@ add_test(NAME hBN_IPA    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME hBN_HSEX   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX   2)
 add_test(NAME Si_DFT_IPA COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_DFT_IPA 1)
 add_test(NAME Si_IPA     COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA     2)
+# initial time before the laser
+add_test(NAME Si_IPA_initialtime COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA_initialtime 1)
 add_test(NAME Si_HSEX    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_HSEX    2)
 # the gradient in k space works only with 1 MPI rank
 add_test(NAME GaAs_IPA   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_IPA   1)

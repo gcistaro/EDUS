@@ -58,7 +58,13 @@ for ref in "${REF_DIR}"/*; do
                 || echo "[ERROR] Absorbance.py failed, see ${OUT_DIR}/absorbance.log"
             out="${file}"
             ;;
-        BANDSTRUCTURE.txt|pdos.txt|wannier_tb.dat)
+        BANDSTRUCTURE.txt)
+            # energies and orbital weights |U|^2, written with 6 significant digits: the weights
+            # depend on the diagonalization (LAPACK) in the last digits, especially at degenerate k points
+            out="${file}"
+            tolerance="--rtol 1e-5 --atol 1e-5"
+            ;;
+        pdos.txt|wannier_tb.dat)
             # written in the working directory, with a limited number of digits
             out="${file}"
             tolerance="--rtol 1e-5 --atol 1e-8"

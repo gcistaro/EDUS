@@ -106,6 +106,13 @@ jobs:
           cd build
           ctest -R "^Si_IPA$" --output-on-failure
 
+      - name: Run Si_IPA_initialtime test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_IPA_initialtime$" --output-on-failure
+
       - name: Run Si_HSEX test
         env:
           MPIEXEC_FLAGS: --oversubscribe
