@@ -3,7 +3,7 @@
 #include <complex>
 
 __global__
-void Apply_Peierls_phase_kernel(
+void apply_peierls_phase_kernel(
     cuDoubleComplex* __restrict__ O,
     const cuDoubleComplex* __restrict__ Peierls_phase,
     int N, 
@@ -42,7 +42,7 @@ void Compute_Peierls_phase_kernel(cuDoubleComplex* __restrict__ Peierls_phase,
 }
 
 
-void Apply_Peierls_phase_gpu( std::complex<double>* O__, 
+void apply_peierls_phase_gpu( std::complex<double>* O__, 
                               std::complex<double>* Peierls_phase,    
                               double* A0__, 
                               double* A1__, 
@@ -65,7 +65,7 @@ void Apply_Peierls_phase_gpu( std::complex<double>* O__,
                           nR);
     blocks = (N+threads-1)/threads;
 
-    Apply_Peierls_phase_kernel<<<threads, blocks>>>
+    apply_peierls_phase_kernel<<<threads, blocks>>>
             (reinterpret_cast<cuDoubleComplex*>(O__),
              reinterpret_cast<const cuDoubleComplex*>(Peierls_phase),
              N, 

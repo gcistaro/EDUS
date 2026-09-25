@@ -181,7 +181,7 @@ void Hartree_interaction(BlockMatrix<std::complex<double>>& HR__,
     Hartree_interaction_cpu(HR__, Hartree, DMR__, DM0R_, index_origin_local);
 }
 
-/// @brief This function calculates the effective Hamiltonian from the Coulomb interaction. 
+/// @brief Adds to H__ the mean-field self energy due to the Coulomb interaction.
 /// The Coulomb interaction has two different terms: 
 /// - The Hartree term 
 /// @f[
@@ -195,21 +195,16 @@ void Hartree_interaction(BlockMatrix<std::complex<double>>& HR__,
 /// Notice that, as we always supposed that the model Hamiltonian at equilibrium @f$ H_0 @f$ already contains the contribution
 /// of the Coulomb interaction due to the ground state, to avoid double counting we need to define the effective Hamiltonian
 /// over  @f$ \Delta \rho(t) = \rho(t)-\rho(t_0)  @f$
-/// @param H__ Hamiltonian Operator, in which we want to add the effective Hamiltonian of the Coulomb interaction
+/// @param H__ Hamiltonian Operator, to which the self energy is added (its R component is used)
 /// @param DM__ Density matrix at current time, that we need to use to calculate the effective Coulomb interaction
 /// @param DM0__ Density matrix at equilibrium, with a valid R component
-/// @param EraseH__ True if we want to erase the H__ matrix before feeding it with the effective Coulomb interaction
-void MeanField::EffectiveHamiltonian(Operator<std::complex<double>>& H__, const Operator<std::complex<double>>& DM__,
-                                  const Operator<std::complex<double>>& DM0__, const bool& EraseH__ ) 
+void MeanField::self_energy(Operator<std::complex<double>>& H__, const Operator<std::complex<double>>& DM__,
+                            const Operator<std::complex<double>>& DM0__) 
 {
     /* We calculate the Coulomb interaction in R space */
     auto& HR__ = H__.get_Operator(R);
     auto& DMR__ = DM__.get_Operator(R);
     auto& DM0R_ = DM0__.get_Operator(R);
-
-    if( EraseH__ ) {
-        HR__.fill(0.);
-    }
 
     if ( !parameters_.enabled ) {
         return;

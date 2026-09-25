@@ -39,9 +39,9 @@ class Propagator
         /// Driver for the time propagation, it defines how we solve the differential equations
         DESolver<Operator<std::complex<double>>> desolver_;
         /// Space where we calculate the commutator @f$ [H, \rho] @f$
-        Space SpaceOfPropagation_ = k;
+        Space propagation_space_ = k;
         /// Space where we evaluate H=H0+E \cdot r
-        Space SpaceOfCalculateTDHamiltonian_ = R;
+        Space ipa_hamiltonian_space_ = R;
         /// Processor where to run the heavy parts of the propagation
 #ifdef EDUS_GPU
         Processor processor_ = device;
@@ -50,9 +50,9 @@ class Propagator
 #endif
 
         /// Initial condition for DESolver: the equilibrium density matrix
-        void InitialCondition(Operator<std::complex<double>>& DM__);
+        void initial_condition(Operator<std::complex<double>>& DM__);
         /// Right hand side of the equation of motion, for DESolver
-        void SourceTerm(Operator<std::complex<double>>& Output__, const double& time__,
+        void source_term(Operator<std::complex<double>>& Output__, const double& time__,
                         const Operator<std::complex<double>>& Input__);
 
     public:
@@ -72,10 +72,10 @@ class Propagator
         /// Advances the density matrix of one time step
         void step();
 
-        /// Calculates H_ = H0 + E(t) \cdot r in the state
-        void Calculate_TDHamiltonian(const double& time__, const bool& erase_H__);
+        /// Sets the hamiltonian of the state to H0 + E(t) \cdot r (independent particles)
+        void ipa_hamiltonian(const double& time__);
         /// Multiplies O__(R) by exp(i*sign*A(t) \cdot R)
-        void Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign,
+        void apply_peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign,
                                  const Processor& proc__=host);
 
         void initialize_device();
@@ -90,7 +90,7 @@ class Propagator
 
 /// Functions to get the device code working
 #ifdef EDUS_GPU
-void Calculate_TDHamiltonian_gpu( std::complex<double>* H__,
+void ipa_hamiltonian_gpu( std::complex<double>* H__,
                                   const std::complex<double>* H0__,
                                   const std::complex<double>* x__,
                                   const std::complex<double>* y__,
@@ -102,7 +102,7 @@ void Calculate_TDHamiltonian_gpu( std::complex<double>* H__,
                                 );
 
 
-void Apply_Peierls_phase_gpu( std::complex<double>* O__,
+void apply_peierls_phase_gpu( std::complex<double>* O__,
                               std::complex<double>* Peierls_phase,
                               double* A0__,
                               double* A1__,
@@ -114,14 +114,14 @@ void Apply_Peierls_phase_gpu( std::complex<double>* O__,
                             );
 #endif
 
-void Calculate_TDHamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
+void ipa_hamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
                                   const BlockMatrix<std::complex<double>>& H0,
                                   const BlockMatrix<std::complex<double>>& x,
                                   const BlockMatrix<std::complex<double>>& y,
                                   const BlockMatrix<std::complex<double>>& z,
                                   const Vector<double>& las);
 
-void Apply_Peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__,
+void apply_peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__,
                               mdarray<std::complex<double>,1>& Peierls_phase,
                               const Coordinate& At,
                               const MeshGrid& Rgrid_gamma,

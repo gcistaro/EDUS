@@ -2,7 +2,7 @@
 #include <cuComplex.h>
 #include <complex>
 __global__
-void Calculate_TDHamiltonian_kernel(
+void ipa_hamiltonian_kernel(
     cuDoubleComplex* __restrict__ H,
     const cuDoubleComplex* __restrict__ H0,
     const cuDoubleComplex* __restrict__ x,
@@ -22,7 +22,7 @@ void Calculate_TDHamiltonian_kernel(
                   cuCmul(make_cuDoubleComplex(*l2, 0.0), z[i])))));
 }
 
-void Calculate_TDHamiltonian_gpu( std::complex<double>* H, 
+void ipa_hamiltonian_gpu( std::complex<double>* H, 
                                   const std::complex<double>* H0, 
                                   const std::complex<double>* x, 
                                   const std::complex<double>* y, 
@@ -35,7 +35,7 @@ void Calculate_TDHamiltonian_gpu( std::complex<double>* H,
 {
     int threads = 256;
     int blocks  = (N+threads-1)/threads;
-    Calculate_TDHamiltonian_kernel<<<blocks, threads>>>
+    ipa_hamiltonian_kernel<<<blocks, threads>>>
                                   ( reinterpret_cast<cuDoubleComplex*>(H), 
                                     reinterpret_cast<const cuDoubleComplex*>(H0), 
                                     reinterpret_cast<const cuDoubleComplex*>(x),

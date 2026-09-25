@@ -122,7 +122,7 @@ void OutputManager::copy_DM_to_aux(const double& time__)
     aux.lock_gauge(DM.get_bandgauge());
 
     if( propagator_->parameters().peierls ) {
-        propagator_->Apply_Peierls_phase(aux, time__, -1);
+        propagator_->apply_peierls_phase(aux, time__, -1);
     }
 }
 
@@ -276,14 +276,15 @@ void OutputManager::write_h5(const double& time__)
     if( parameters_.print_SelfEnergy ) {
         DM.go_to_R(true);
         H.go_to_R(false);
-        meanfield_->EffectiveHamiltonian(H, DM, system_->DM0(), true);
+        H.get_Operator_R().fill(0.);
+        meanfield_->self_energy(H, DM, system_->DM0());
         H.go_to_k(true);
         H.get_Operator_k().write_h5(name, nodename::SelfEnergy, node.str(), decomposition_->kpool_comm());
         DM.go_to_k(false);
     }
     if( parameters_.print_fullH ) {
         /* H is computed in R: bring it to k before writing */
-        propagator_->Calculate_TDHamiltonian(time__, true);
+        propagator_->ipa_hamiltonian(time__);
         H.go_to_k();
         H.get_Operator_k().write_h5(name, nodename::fullH, node.str(), decomposition_->kpool_comm());
     }

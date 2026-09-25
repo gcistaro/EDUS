@@ -40,8 +40,9 @@ namespace electron {
                             const GridStructure& gridstructure__, 
                             const std::vector<Coordinate>& wannier_centers__, 
                             const parallel::Decomposition& decomposition__ );
-            void EffectiveHamiltonian(Operator<std::complex<double>>& H__, const Operator<std::complex<double>>& DM__,
-                                      const Operator<std::complex<double>>& DM0__, const bool& EraseH__);     
+            /// Adds to H__ the mean-field self energy @f$ \Sigma[\rho-\rho_0] @f$ (Hartree + screened exchange)
+            void self_energy(Operator<std::complex<double>>& H__, const Operator<std::complex<double>>& DM__,
+                             const Operator<std::complex<double>>& DM0__);
             
             void initialize_device();
             void print_recap() const;

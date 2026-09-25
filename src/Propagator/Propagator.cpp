@@ -32,9 +32,9 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
     }
 
     desolver_.initialize(state_->DensityMatrix(),
-        [this](Operator<std::complex<double>>& DM__) { InitialCondition(DM__); },
+        [this](Operator<std::complex<double>>& DM__) { initial_condition(DM__); },
         [this](Operator<std::complex<double>>& Output__, const double& time__, const Operator<std::complex<double>>& Input__) {
-            SourceTerm(Output__, time__, Input__);
+            source_term(Output__, time__, Input__);
         },
         parameters_.solver,
         parameters_.order);
@@ -76,16 +76,16 @@ void Propagator::initialize_device()
 /// @f]
 /// already rotated to the wannier gauge, where the equations are propagated.
 /// @param DM__ The Operator where we want to store the initial density matrix
-void Propagator::InitialCondition(Operator<std::complex<double>>& DM__)
+void Propagator::initial_condition(Operator<std::complex<double>>& DM__)
 {
-    PROFILE("RK::InitialCondition");
+    PROFILE("Propagator::initial_condition");
     auto& DM0k = system_->DM0().get_Operator(Space::k);
     std::copy(DM0k.begin(), DM0k.end(), DM__.get_Operator_k().begin());
 
     DM__.lock_gauge(wannier);
     DM__.lock_space(k);
 
-    if(SpaceOfPropagation_ == R) DM__.go_to_R();
+    if(propagation_space_ == R) DM__.go_to_R();
 }
 
 /// @brief This standard function contains what equals the derivative in time of the density matrix.
@@ -97,7 +97,7 @@ void Propagator::InitialCondition(Operator<std::complex<double>>& DM__)
 /// @param Output__ We store here @f$ \frac{\partial \rho}{\partial t} @f$
 /// @param time__ Current time of the simulation, to calculate the time dependent hamiltonian and the laser
 /// @param Input__ Input density matrix, to be used as the density matrix on the RHS of the equation
-void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const double& time__,
+void Propagator::source_term(Operator<std::complex<double>>& Output__, const double& time__,
                             const Operator<std::complex<double>>& Input__)
 {
     auto& H_ = state_->H();
@@ -119,7 +119,7 @@ void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const doub
     }
 
     /* IPA Hamiltonian H_ = H0_ + E \cdot r*/
-    Calculate_TDHamiltonian(time__, true);
+    ipa_hamiltonian(time__);
 
     /* Coulomb interaction H_ += \Sigma^H[\rho] + \Sigma^{SEX}[\rho] */
     H_.go_to_R();
@@ -127,23 +127,23 @@ void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const doub
     if(parameters_.peierls) {
         copy(Input__.get_Operator(R), aux_DM_.get_Operator(R), processor_);
         aux_DM_.lock_space(R);
-        Apply_Peierls_phase(aux_DM_, time__, -1, processor_);
+        apply_peierls_phase(aux_DM_, time__, -1, processor_);
     }
     auto& DM = parameters_.peierls ? aux_DM_ : Input__;
-    meanfield_->EffectiveHamiltonian( H_, DM, system_->DM0(), false);
+    meanfield_->self_energy(H_, DM, system_->DM0());
 
     /* Peierls transformation H_(R) = H_(R)*exp(+i*A(t) \cdot R) */
     if(parameters_.peierls) {
-        Apply_Peierls_phase(H_, time__, +1, processor_);
+        apply_peierls_phase(H_, time__, +1, processor_);
     }
 
     /* Output__ += -i * [ H_, Input__ ] */
     Output__.go_to_k();
     H_.go_to_k();
     const_cast<Operator<std::complex<double>>&>(Input__).lock_space(Space::k); //this is already updated, no need to ft
-    auto& Output = Output__.get_Operator(SpaceOfPropagation_);
-    auto& Input = Input__.get_Operator(SpaceOfPropagation_);
-    auto& H = H_.get_Operator(SpaceOfPropagation_);
+    auto& Output = Output__.get_Operator(propagation_space_);
+    auto& Input = Input__.get_Operator(propagation_space_);
+    auto& H = H_.get_Operator(propagation_space_);
 
     commutator(Output, -im, H, Input, false, processor_);
 
@@ -152,7 +152,7 @@ void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const doub
         auto& DM0k = system_->DM0().get_Operator(Space::k);
 
         if(parameters_.peierls) {
-            Apply_Peierls_phase(Output__, time__, -1, processor_);
+            apply_peierls_phase(Output__, time__, -1, processor_);
         }
 
         Output__.go_to_k();
@@ -165,7 +165,7 @@ void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const doub
             }
         }
         if(parameters_.peierls) {
-            Apply_Peierls_phase(Output__, time__, +1, processor_);
+            apply_peierls_phase(Output__, time__, +1, processor_);
         }
     }
     //TODO: these two lines come from the old code, they look like a leftover of gpu debugging
@@ -173,7 +173,7 @@ void Propagator::SourceTerm(Operator<std::complex<double>>& Output__, const doub
     Output__.get_Operator(k).set_processor(device);
 }
 
-void Calculate_TDHamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
+void ipa_hamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
                                   const BlockMatrix<std::complex<double>>& H0,
                                   const BlockMatrix<std::complex<double>>& x,
                                   const BlockMatrix<std::complex<double>>& y,
@@ -198,32 +198,29 @@ void Calculate_TDHamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
 /// @f[
 /// H_{\text{1B}}(\textbf{k}) = H_0(\textbf{k})+ \boldsymbol{\varepsilon}(t)\cdot \Xi(\textbf{k})
 ///@f]
+/// The previous content of the hamiltonian of the state is overwritten.
 /// @param time__ Time on which we want to calculate the hamiltonian, used for the laser
-/// @param erase_H__ If true, we delete H_ before computing it. Needs to be false during
-/// time propagation to sum up contributions
-void Propagator::Calculate_TDHamiltonian(const double& time__, const bool& erase_H__)
+void Propagator::ipa_hamiltonian(const double& time__)
 {
 #ifdef EDUS_TIMERS
-    PROFILE("SourceTerm::Calculate_TDHamiltonian");
+    PROFILE("Propagator::ipa_hamiltonian");
 #endif
     //--------------------get aliases for nested variables--------------------------------
     auto& H_ = state_->H();
-    auto& H = H_.get_Operator(SpaceOfCalculateTDHamiltonian_);
-    auto& H0 = system_->H0().get_Operator(SpaceOfCalculateTDHamiltonian_);
-    auto& x = system_->r()[0].get_Operator(SpaceOfCalculateTDHamiltonian_);
-    auto& y = system_->r()[1].get_Operator(SpaceOfCalculateTDHamiltonian_);
-    auto& z = system_->r()[2].get_Operator(SpaceOfCalculateTDHamiltonian_);
+    auto& H = H_.get_Operator(ipa_hamiltonian_space_);
+    auto& H0 = system_->H0().get_Operator(ipa_hamiltonian_space_);
+    auto& x = system_->r()[0].get_Operator(ipa_hamiltonian_space_);
+    auto& y = system_->r()[1].get_Operator(ipa_hamiltonian_space_);
+    auto& z = system_->r()[2].get_Operator(ipa_hamiltonian_space_);
 
     auto las  = (*lasers_)(time__).get("Cartesian");
-    if (erase_H__) {
-        H.fill(0.);
-    }
-    H_.lock_space(SpaceOfCalculateTDHamiltonian_);
+    H.fill(0.);
+    H_.lock_space(ipa_hamiltonian_space_);
 #ifdef EDUS_GPU
     if ( processor_ == device ) {
         las.initialize_device();
         las.transfer_to(device);
-        Calculate_TDHamiltonian_gpu(H.data(device),
+        ipa_hamiltonian_gpu(H.data(device),
                                     H0.data(device),
                                     x.data(device),
                                     y.data(device),
@@ -237,10 +234,10 @@ void Propagator::Calculate_TDHamiltonian(const double& time__, const bool& erase
         return;
     }
 #endif
-    Calculate_TDHamiltonian_cpu(H, H0, x, y, z, las);
+    ipa_hamiltonian_cpu(H, H0, x, y, z, las);
 }
 
-void Propagator::Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign,
+void Propagator::apply_peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign,
                                      const Processor& proc__)
 {
     O__.go_to_R();
@@ -252,7 +249,7 @@ void Propagator::Apply_Peierls_phase(Operator<std::complex<double>>& O__, const 
         auto At_cart     = At.get("Cartesian");
         At_cart.initialize_device();
         At_cart.transfer_to(processor_);
-        Apply_Peierls_phase_gpu(    O__.get_Operator(R).data(device),
+        apply_peierls_phase_gpu(    O__.get_Operator(R).data(device),
                                     state_->Peierls_phase().data(device),
                                     At_cart.data(device),
                                     At_cart.data(device)+1,
@@ -266,14 +263,14 @@ void Propagator::Apply_Peierls_phase(Operator<std::complex<double>>& O__, const 
         return;
     }
 #endif
-    Apply_Peierls_phase_cpu(O__.get_Operator(R),
+    apply_peierls_phase_cpu(O__.get_Operator(R),
                             state_->Peierls_phase(),
                             At,
                             *Rgrid_gamma_,
                             sign);
 }
 
-void Apply_Peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__,
+void apply_peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__,
                               mdarray<std::complex<double>,1>& Peierls_phase,
                               const Coordinate& At,
                               const MeshGrid& Rgrid_gamma,
