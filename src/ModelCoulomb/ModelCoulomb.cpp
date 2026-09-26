@@ -19,18 +19,14 @@ CoulombModel model(const std::string& model_name__)
 }
 
 /// @brief Constructor that calls the initialization of the class 
-/// @param r Position operator read from Wannier90, in a.u.
-/// @param MasterRGrid Grid in R space used in the code, (N.B: it is different than the one in r because that one is read from _tb file)
-/// @param read_interaction__ true if interaction is read from a file
-/// @param file_path__ where to find the file to read the interaction if read_interaction__=true
-/// @param spin_deg__ can be 1 or 2
-ModelCoulomb::ModelCoulomb(const std::array<Operator<std::complex<double>>,3>& r__,
-                           const std::shared_ptr<MeshGrid>& MasterRGrid__, 
-                           const bool& read_interaction__,
-                           const std::string& file_path__, 
-                           const int spin_deg__)
+ModelCoulomb::ModelCoulomb(const std::vector<Coordinate>& wannier_centers__, 
+                     const std::shared_ptr<MeshGrid>& Rgrid_gammaCentered__, 
+                     const bool read_interaction__, 
+                     const std::string& file_path__, 
+                     const MPIindex<3>& mpindex__, 
+                     const int spin_deg__)
 {
-    initialize(r__, MasterRGrid__, read_interaction__, file_path__, spin_deg__);
+    initialize(wannier_centers__, Rgrid_gammaCentered__, read_interaction__, file_path__, mpindex__, spin_deg__);
 }
 
 /// @brief Initialization of matrix elements calling back the right function
@@ -48,9 +44,9 @@ void ModelCoulomb::initialize_Potential(const std::vector<Coordinate>& wannier_c
         auto& R = (*Rgrid_)[iR_global];
 
         for(int in=0; in<Potential_.get_Size(1); in++) {
-            auto r = wannier_centers__[in] - R;
             for(int im=0; im<Potential_.get_Size(2); im++){
-                r = r - wannier_centers__[im];
+                /* distance between the center of the wannier function in in the cell 0 and im in the cell R */
+                auto r = wannier_centers__[in] - R - wannier_centers__[im];
                 Potential_(iR_local, in, im) = double(spin_deg_)*Potentials_wrapper(r);
             }
         }
@@ -89,7 +85,7 @@ void ModelCoulomb::initialize_Potential(const std::string& file_path__, const in
     Potential_.fill(0.0);
     for (int iRCoulomb=0; iRCoulomb<R_MeshGrid.get_TotalSize(); iRCoulomb++) {
         if ( Rgrid_->mpindex.is_local( ci(iRCoulomb,0) ) ) {
-            auto iR_local = Rgrid_->mpindex.glob1D_to_loc1D( ci(iRCoulomb,0) );
+            auto iR_local = int(Rgrid_->mpindex.glob1D_to_loc1D( ci(iRCoulomb,0) ));
             for (int irow=0; irow<nbnd__; irow++) {
                 for (int icol=0; icol<nbnd__; icol++) {
                     int iline = nbnd__*2*irow + 2*icol + (std::pow(nbnd__,2)*2+1)*iRCoulomb + 1;
@@ -106,58 +102,40 @@ void ModelCoulomb::initialize_Potential(const std::string& file_path__, const in
 }
 
 /// @brief Initialization of the variables of the class
-/// @param r Position operator read from Wannier90, in a.u.
-/// @param MasterRGrid Grid in R space used in the code, (N.B: it is different than the one in r because that one is read from _tb file)
-/// @param read_interaction__ true if interaction is read from a file
-/// @param file_path__ where to find the file to read the interaction if read_interaction__=true
-/// @param spin_deg__ can be 1 or 2
-void ModelCoulomb::initialize(const std::array<Operator<std::complex<double>>,3>& r__,
-                           const std::shared_ptr<MeshGrid>& MasterRGrid__, 
-                           const bool& read_interaction__,
-                           const std::string& file_path__, 
-                           const int spin_deg__)
+void ModelCoulomb::initialize(const std::vector<Coordinate>& wannier_centers__, 
+                     const std::shared_ptr<MeshGrid>& Rgrid_gammaCentered__, 
+                     const bool read_interaction__, 
+                     const std::string& file_path__, 
+                     const MPIindex<3>& mpindex__, 
+                     const int spin_deg__)
 {    
     spin_deg_ = spin_deg__;
+    Rgrid_ = Rgrid_gammaCentered__;
+    auto nbnd = wannier_centers__.size();
 
-    /* define wannier_centers from <n0|r|n0> */
-    auto index_origin = r__[0].get_Operator_R().get_MeshGrid()->find(Coordinate(0,0,0));
-    auto& x0 = (r__[0].get_Operator_R())[index_origin];
-    auto& y0 = (r__[1].get_Operator_R())[index_origin];
-    auto& z0 = (r__[2].get_Operator_R())[index_origin];
-
-    auto nbnd = r__[0].get_Operator_R().get_nrows();
-    std::vector<Coordinate> wannier_centers(nbnd);
-    
-    for(int in=0; in<nbnd; in++) {
-        wannier_centers[in] = Coordinate(x0(in,in).real(), y0(in,in).real(), z0(in,in).real());
-    }
-    output::print("wannier centers");
-    for(int in=0; in<nbnd; in++) {
-       output::print(wannier_centers[in].get("Cartesian")[0], wannier_centers[in].get("Cartesian")[1], wannier_centers[in].get("Cartesian")[2]);
-    }
-
-    /* find minimum (non-zero) distance between wannier centers */
+    /* find minimum distance between wannier centers on different sites. Centers closer than
+       same_site_distance (a.u.) are considered on the same site, e.g. spin partners or orbitals
+       of the same atom whose centers differ only by numerical noise: their interaction is
+       saturated at the minimum distance, like the on-site one */
+    const double same_site_distance = 0.1;
     min_distance_ = Coordinate(100,0,0,"Cartesian");
     min_distance_norm_ = min_distance_.norm();
     for(int in=0; in<nbnd; in++) {
         for(int im=in+1; im<nbnd; ++im) {
-            auto distance = wannier_centers[in]-wannier_centers[im];
-            if( distance.norm() < min_distance_norm_ && distance.norm() > 1.e-05 ) {
+            auto distance = wannier_centers__[in]-wannier_centers__[im];
+            if( distance.norm() < min_distance_norm_ && distance.norm() > same_site_distance ) {
                 min_distance_ = distance;
                 min_distance_norm_ = min_distance_.norm();
             }
         }
     }
 
-    /* Define grid centered at 0 */
-    Rgrid_ = std::make_shared<MeshGrid>(get_GammaCentered_grid(*MasterRGrid__));
-
     /* initialize potential matrix elements */
     if (read_interaction__) {
         initialize_Potential(file_path__, nbnd );
     }
     else {
-        initialize_Potential(wannier_centers);
+        initialize_Potential(wannier_centers__);
     }
 }
 

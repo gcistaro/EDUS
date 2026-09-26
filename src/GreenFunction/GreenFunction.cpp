@@ -6,12 +6,12 @@ void GreenFunction::initialize()
     throw std::runtime_error("Error in GreenFunction::initialize: Compiled without HDF5 support");
 #endif
     /* allocate memory for operators */
-//    DM_           .initialize_fft(DEsolver_DM_.get_Function());
-//    H_            .initialize_fft(DEsolver_DM_.get_Function());
-    Ut_           .initialize_fft(DEsolver_DM_.get_Function());
-    Utime_        .initialize_fft(DEsolver_DM_.get_Function());
-    Uptime_       .initialize_fft(DEsolver_DM_.get_Function());
-    GR_           .initialize_fft(DEsolver_DM_.get_Function());
+//    DM_           .initialize_fft(DEsolver_DM_.function());
+//    H_            .initialize_fft(DEsolver_DM_.function());
+    Ut_           .initialize_fft(DEsolver_DM_.function());
+    Utime_        .initialize_fft(DEsolver_DM_.function());
+    Uptime_       .initialize_fft(DEsolver_DM_.function());
+    GR_           .initialize_fft(DEsolver_DM_.function());
     
     /* initialize solver for Ut */
     std::function<void(Operator<std::complex<double>>&)> 
@@ -28,7 +28,7 @@ void GreenFunction::initialize()
     {
         /* EOM:      i\dot{U} = H.U */
         /* read H from saved datas */
-        auto CurrentTime = DEsolver_DM_.get_CurrentTime();
+        auto CurrentTime = DEsolver_DM_.current_time();
         std::string name_ = "output.h5";
         auto node = get_it_sparse(CurrentTime); 
         H_.get_Operator(Space::k).load(name_, node, nodename::H0pCoulomb); 
@@ -37,17 +37,20 @@ void GreenFunction::initialize()
                  H_.get_Operator(Space::k), 
                  Input__.get_Operator(Space::k));
     };
-    DEsolver_Ut_.initialize( Ut_, InitialCondition_U, SourceTerm_U, AB, 5 );
+    DESolverParameters desolver_parameters;
+    desolver_parameters.solver = AB;
+    desolver_parameters.order = 5;
+    DEsolver_Ut_.initialize( Ut_, InitialCondition_U, SourceTerm_U, desolver_parameters );
 }
 
 void GreenFunction::Propagator(Operator<std::complex<double>>& Ut__, const double t__)
 {
-    if ( ( DEsolver_Ut_.get_CurrentTime() - t__ ) > 1.e-06 ) {
+    if ( ( DEsolver_Ut_.current_time() - t__ ) > 1.e-06 ) {
         //read it from file
     }
     else {
-        auto nsteps = (t__ - DEsolver_Ut_.get_CurrentTime())/double(DEsolver_Ut_.get_ResolutionTime() );
-        DEsolver_Ut_.Propagate( nsteps );
+        auto nsteps = (t__ - DEsolver_Ut_.current_time())/double(DEsolver_Ut_.time_step() );
+        DEsolver_Ut_.propagate( nsteps );
     }
 }
 

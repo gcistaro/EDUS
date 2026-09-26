@@ -13,6 +13,9 @@ jobs:
       # 1. Get code
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # ab-initio models of the tests (gcistaro/EDUS-models)
+          submodules: true
 
       # 2. Show environment (VERY IMPORTANT for debugging)
       - name: Inspect system
@@ -76,11 +79,92 @@ jobs:
           cmake --build build -j$(nproc) 
 
       - name: Run hBN_IPA test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
         run: |
           cd build
           ctest -R "^hBN_IPA$" --output-on-failure
-      
+
       - name: Run hBN_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
         run: |
           cd build
           ctest -R "^hBN_HSEX$" --output-on-failure
+
+      - name: Run Si_DFT_IPA test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_DFT_IPA$" --output-on-failure
+
+      - name: Run Si_IPA test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_IPA$" --output-on-failure
+
+      - name: Run Si_IPA_initialtime test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_IPA_initialtime$" --output-on-failure
+
+      - name: Run Si_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_HSEX$" --output-on-failure
+
+      - name: Run GaAs_IPA test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^GaAs_IPA$" --output-on-failure
+
+      - name: Run GaAs_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^GaAs_HSEX$" --output-on-failure
+
+      - name: Run LiF_IPA test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^LiF_IPA$" --output-on-failure
+
+      - name: Run LiF_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^LiF_HSEX$" --output-on-failure
+
+      - name: Run MoS2_HSEX test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^MoS2_HSEX$" --output-on-failure
+
+      - name: Run hBN_HSEX_np4 test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^hBN_HSEX_np4$" --output-on-failure
+
+      - name: Run LiF_HSEX_np4 test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^LiF_HSEX_np4$" --output-on-failure

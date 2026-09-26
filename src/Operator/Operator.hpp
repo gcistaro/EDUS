@@ -119,8 +119,8 @@ class Operator
         static BlockMatrix<T> temp_k;
         friend class Simulation;
         static std::shared_ptr<MeshGrid> MeshGrid_Null;
-        static BlockMatrix<T> EigenVectors;
-        static BlockMatrix<T> EigenVectors_dagger;
+        const static BlockMatrix<T>* EigenVectors;
+        const static BlockMatrix<T>* EigenVectors_dagger;
         static MPIindex<3> mpindex;
         Operator() : Operator_k(BlockMatrix<T>()), Operator_R(BlockMatrix<T>()){Operator_k.set_space(k); Operator_R.set_space(R);};
 
@@ -172,8 +172,19 @@ class Operator
         {
             return const_cast<BlockMatrix<T>&>(static_cast<const Operator<T>&>(*this).get_Operator(space__));
         };       
-        
+
+        BlockMatrix<T>& operator()(const Space& space__)
+        {
+            return const_cast<BlockMatrix<T>&>(static_cast<const Operator<T>&>(*this).get_Operator(space__));
+        };       
+
         const BlockMatrix<T>& get_Operator(const Space& space__) const
+        {
+            auto& Operator_to_return = space__ == k ? Operator_k : Operator_R;
+            return Operator_to_return;
+        };      
+
+        const BlockMatrix<T>& operator()(const Space& space__) const
         {
             auto& Operator_to_return = space__ == k ? Operator_k : Operator_R;
             return Operator_to_return;
@@ -250,6 +261,62 @@ class Operator
             this->space = R;
             locked_space = true;
         };
+
+
+        void initialize_fft(const std::shared_ptr<MeshGrid>& MGR, 
+                            const std::shared_ptr<MeshGrid>& Mgk, 
+                            const int& nbnd, 
+                            const MPIindex<3>& mpindex__,
+                            const std::string& tagname_="")
+        {
+            tagname = tagname_;
+            //for now this is the only case implemented. it will be more general.
+            //we enter in this function only once
+            if(initialized_fft){
+                return;
+            }
+            initialized_fft = true;
+#ifdef EDUS_MPI
+            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex__.get_nlocal(), nbnd, nbnd, 
+                                                            mpindex__.get_RecommendedAllocate_fftw());
+#else
+            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex__.get_nlocal(), nbnd, nbnd, 
+                                                            mpindex__.get_RecommendedAllocate_fftw());
+#endif
+
+            FT_meshgrid_R = MGR;
+            FT_meshgrid_k = Mgk;
+            auto& Rgrid = Operator_R.get_MeshGrid();
+            Rgrid = MGR;
+
+            Operator_k = BlockMatrix<std::complex<double>>(k,mpindex__.get_nlocal(), nbnd, nbnd,
+                                                           mpindex__.get_RecommendedAllocate_fftw());
+            auto& kgrid = Operator_k.get_MeshGrid();
+            kgrid = FT_meshgrid_k;
+            //bandindex.initialize(nbnd);
+            bandindex.initialize({nbnd, nbnd});
+
+            //bandindex FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex__.get_RecommendedAllocate_fftw()});
+            //bandindex FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex__.get_RecommendedAllocate_fftw()});
+            auto dim_k = mpindex__.get_nlocal() > 0 ? mpindex__.get_nlocal() : 1;//to avoid that we get a 0 allocated pointer
+//==#ifdef EDUS_MPI
+            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {dim_k,nbnd*nbnd} );
+            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {dim_k,nbnd*nbnd} );
+//==#else
+//==            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex__.get_nlocal()});
+//==            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex__.get_nlocal()});
+//==#endif
+            //use convolution index for shuffle index.
+            std::vector<int> Dimensions(3);
+            for(int ix=0; ix<3; ix++){
+                Dimensions[ix] = FT_meshgrid_k->get_Size()[ix];
+            }
+            ft_.initialize(FTfriendly_Operator_k, FTfriendly_Operator_R, Dimensions, tagname);
+            //shuffle_to_fft();
+            this->space = R;
+            locked_space = true;
+        };
+
 
         void initialize_fft(const Operator& Op__, const std::string& tagname__="")
         {            
@@ -538,9 +605,9 @@ class Operator
             auto temp_k = Operator_k;
             temp_k.fill(0); 
 
-            multiply(temp_k, std::complex<double>(1.), EigenVectors, Operator_k);
+            multiply(temp_k, std::complex<double>(1.), *EigenVectors, Operator_k);
             Operator_k.fill(0);
-            multiply(Operator_k, std::complex<double>(1.), temp_k, EigenVectors_dagger);
+            multiply(Operator_k, std::complex<double>(1.), temp_k, *EigenVectors_dagger);
             bandgauge = wannier;
         };
 
@@ -557,9 +624,9 @@ class Operator
             go_to_k();
             auto temp_k = Operator_k;
             temp_k.fill(0); 
-            multiply(temp_k, std::complex<double>(1.), EigenVectors_dagger, Operator_k);
+            multiply(temp_k, std::complex<double>(1.), *EigenVectors_dagger, Operator_k);
             Operator_k.fill(0);
-            multiply(Operator_k, std::complex<double>(1.), temp_k, EigenVectors);
+            multiply(Operator_k, std::complex<double>(1.), temp_k, *EigenVectors);
             bandgauge = bloch;
         };
 
@@ -616,6 +683,9 @@ class Operator
             space = space__;
             locked_space = true;
         };
+
+        Space get_space() const { return space; }
+        BandGauge get_bandgauge() const { return bandgauge; }
 
 
         void initialize_dims(const Operator<T>& Allocated_Op)
@@ -722,10 +792,10 @@ template < typename T>
 MultiIndex<2> Operator<T>::bandindex;
 
 template < typename T>
-BlockMatrix<T> Operator<T>::EigenVectors;
+const BlockMatrix<T>* Operator<T>::EigenVectors;
 
 template < typename T>
-BlockMatrix<T> Operator<T>::EigenVectors_dagger;
+const BlockMatrix<T>* Operator<T>::EigenVectors_dagger;
 
 
 template < typename T>

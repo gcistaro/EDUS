@@ -20,12 +20,6 @@
 #include "cublas_v2.h"
 #endif
 
-#ifdef EDUS_MPI
-extern std::unique_ptr<mpi::Communicator> kpool_comm;
-extern std::unique_ptr<mpi::Communicator> band_comm;
-extern int NumberKpools;
-#endif
-
 #ifdef EDUS_GPU
 extern cublasHandle_t cublas_handle;
 #endif

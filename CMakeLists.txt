@@ -14,7 +14,7 @@ set(BLA_STATIC OFF)
 # Options
 # =================================================================================
 option(EDUS_PROFILE     "Profiling function timings"                           ON )
-option(EDUS_MKL         "Enable MKL"                                           ON )
+option(EDUS_MKL         "Enable MKL"                                           OFF )
 option(EDUS_MPI         "Enabling MPI"                                         ON )
 option(EDUS_BATCHGEMM   "Enabling Batch Gemm for k matrix multiplication"      OFF)
 option(EDUS_FFTWTHREADS "Enabling threads in fftw"                             OFF)                
@@ -119,11 +119,17 @@ set(_SOURCES src/initialize.cpp
              src/core/cmd_args/cmd_args.cpp
              src/core/rt_graph.cpp
              src/core/mpi/Communicator.cpp
-             src/Coulomb/Coulomb.cpp
+             src/MeanField/MeanField.cpp
 #             src/Screened_potential/Screened_potential.cpp
 #             src/GreenFunction/GreenFunction.cpp
              src/ModelCoulomb/ModelCoulomb.cpp
              src/ModelCoulomb/Potentials.cpp
+             src/Electrons/System.cpp
+             src/Electrons/BandStructurePath.cpp
+             src/Electrons/Pdos.cpp
+             src/Propagator/Propagator.cpp
+             src/Output/OutputManager.cpp
+             src/GridStructure/GridStructure.cpp
     )
 
 if (EDUS_GPU)
@@ -331,8 +337,26 @@ enable_testing()
 #            ${CMAKE_CURRENT_BINARY_DIR}/NonEQ_Grad ${PROJECT_SOURCE_DIR}/ci-test/inputs/input_NonEQ_Grad.json"
 #            )
 #
-add_test(NAME hBN_IPA COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_IPA)
-add_test(NAME hBN_HSEX COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX)
+# regression tests: run.sh <name> <number of MPI ranks>
+# Si, GaAs and LiF are ab-initio models (KCW, Si also DFT) from the KCW+EDUS project
+add_test(NAME hBN_IPA    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_IPA    1)
+add_test(NAME hBN_HSEX   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX   2)
+add_test(NAME Si_DFT_IPA COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_DFT_IPA 1)
+add_test(NAME Si_IPA     COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA     2)
+# initial time before the laser
+add_test(NAME Si_IPA_initialtime COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA_initialtime 1)
+add_test(NAME Si_HSEX    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_HSEX    2)
+# the gradient in k space works only with 1 MPI rank
+add_test(NAME GaAs_IPA   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_IPA   1)
+add_test(NAME GaAs_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_HSEX  2)
+add_test(NAME LiF_IPA    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_IPA    2)
+add_test(NAME LiF_HSEX   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX   2)
+# 2D, 34 bands with spin-orbit, Rytova-Keldysh interaction computed from the model
+add_test(NAME MoS2_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh MoS2_HSEX  2)
+# same tests with 4 ranks (for LiF the 9 planes of the grid are split unevenly among them)
+add_test(NAME hBN_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX 4)
+add_test(NAME LiF_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX 4)
+set_tests_properties(hBN_HSEX_np4 LiF_HSEX_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
 ############
 ############add_test(NAME MPI_hBN COMMAND
 ############          bash -c "mkdir ${CMAKE_SOURCE_DIR}/CTEST; 

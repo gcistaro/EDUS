@@ -278,6 +278,8 @@ namespace mpi
             };
 
             void barrier() {};
+            int rank() const { return 0; }
+            int size() const { return 1; }
     };
 
 };

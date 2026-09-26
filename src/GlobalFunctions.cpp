@@ -42,9 +42,9 @@ void dump_json_in_h5( const nlohmann::json& data__, const std::string& name__ )
         fout["json"].write("num_bands", data__["num_bands"].template get<int>());
         fout["json"].write("num_kpoints", data__["num_kpoints"].template get<int>());
         fout["json"].write("solver", data__["solver"].template get<std::string>());
-#ifdef EDUS_MPI 
-        fout["json"].write("comm_size", kpool_comm->size());
-#endif
+        if ( data__.contains("comm_size") ) {
+            fout["json"].write("comm_size", data__["comm_size"].template get<int>());
+        }
         for ( int ilaser = 0; ilaser < int( data__["lasers"].size() ); ++ilaser ) {
             auto lasername = "laser"+std::to_string(ilaser);
             fout["json"].create_node(lasername);
@@ -52,11 +52,11 @@ void dump_json_in_h5( const nlohmann::json& data__, const std::string& name__ )
             fout["json"][lasername].write("frequency",  data__["lasers"][ilaser]["frequency"].template get<double>());
             fout["json"][lasername].write("wavelength", data__["lasers"][ilaser]["wavelength"].template get<double>());
             fout["json"][lasername].write("cycles", data__["lasers"][ilaser]["cycles"].template get<int>());
-            auto grid = std::vector<int>(3);
-            grid = { data__["lasers"][ilaser]["polarization"][0].template get<int>(), 
-                     data__["lasers"][ilaser]["polarization"][1].template get<int>(), 
-                     data__["lasers"][ilaser]["polarization"][2].template get<int>()}; 
-            fout["json"][lasername].write("polarization", data__["lasers"][ilaser]["cycles"].template get<int>());
+            auto polarization = std::vector<double>(3);
+            polarization = { data__["lasers"][ilaser]["polarization"][0].template get<double>(), 
+                             data__["lasers"][ilaser]["polarization"][1].template get<double>(), 
+                             data__["lasers"][ilaser]["polarization"][2].template get<double>()}; 
+            fout["json"][lasername].write("polarization", polarization);
         }
         fout["json"].write("kpoints", data__["kpoints"].get<std::vector<double>>());
         fout["json"].write("A", data__["A"].get<std::vector<double>>());

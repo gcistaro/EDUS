@@ -4,6 +4,7 @@
 #include <cctype>
 #include <locale>
 #include "core/profiler.hpp"
+#include "LinearAlgebra/gemm.hpp"
 #ifdef EDUS_GPU
 #include <cuda_runtime.h>
 #include <cuComplex.h>
@@ -174,14 +175,32 @@ std::complex<double> FourierTransform::dft(const std::vector<double>& Point, con
 mdarray<std::complex<double>, 2> FourierTransform::dft(const std::vector<std::vector<double>>& ArrayOfPoints, const int& sign)
 {
     PROFILE("dft");
-    auto md_K = mdarray<std::complex<double>, 2>({Array_x->get_Size()[0], int(ArrayOfPoints.size())});
+    int npoints = int(ArrayOfPoints.size());
+    int nmesh = int(Mesh.size());
+    assert(Array_x->get_Size(1) == nmesh);
+    auto md_K = mdarray<std::complex<double>, 2>({Array_x->get_Size()[0], npoints});
     Array_k = &md_K;
+    if( npoints == 0 ) {
+        return (*Array_k);
+    }
+
+    /* the phases depend only on the points: phase(i, ip) = exp(sign*i*2pi*Mesh[i].Point[ip]) */
+    mdarray<std::complex<double>, 2> phase({nmesh, npoints});
+    const std::complex<double> im2pi = im*2.*pi;
     #pragma omp parallel for collapse(2)
-    for(int h=0; h<howmany; ++h){
-        for(int ip=0; ip<int(ArrayOfPoints.size()); ++ip){
-            (*Array_k)(h,ip) = dft(ArrayOfPoints[ip], h, sign);
+    for(int i=0; i<nmesh; ++i){
+        for(int ip=0; ip<npoints; ++ip){
+            double DotProduct = 0.;
+            for(int ix=0; ix<dim; ix++){
+                DotProduct += ArrayOfPoints[ip][ix]*Mesh[i][ix];
+            }
+            phase(i, ip) = std::exp(double(sign)*im2pi*DotProduct);
         }
     }
+
+    /* Array_k(h, ip) = sum_i Array_x(h, i) * phase(i, ip) */
+    gemm(howmany, npoints, nmesh, std::complex<double>(1.), Array_x->data(), nmesh,
+         phase.data(), npoints, std::complex<double>(0.), Array_k->data(), npoints);
     return (*Array_k);
 }
 

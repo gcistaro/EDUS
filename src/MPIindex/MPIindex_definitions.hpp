@@ -55,7 +55,7 @@ void MPIindex<dim>::initialize( const std::array<int, 3>& ValuesToSplit__, const
 }
 
 template<size_t dim>
-inline std::ptrdiff_t MPIindex<dim>::glob1D_to_loc1D(const std::ptrdiff_t& global)
+inline std::ptrdiff_t MPIindex<dim>::glob1D_to_loc1D (const std::ptrdiff_t& global) const
 {
     assert( global >= GlobalRange_1D.first && global <= GlobalRange_1D.second );
 
@@ -63,7 +63,7 @@ inline std::ptrdiff_t MPIindex<dim>::glob1D_to_loc1D(const std::ptrdiff_t& globa
 }
 
 template<size_t dim>
-inline std::ptrdiff_t MPIindex<dim>::loc1D_to_glob1D(const std::ptrdiff_t& local)
+inline std::ptrdiff_t MPIindex<dim>::loc1D_to_glob1D (const std::ptrdiff_t& local) const
 {
     assert( local >= 0 && local < nlocal );
     return local + LocalRange_1D.first; 
@@ -71,26 +71,26 @@ inline std::ptrdiff_t MPIindex<dim>::loc1D_to_glob1D(const std::ptrdiff_t& local
 
 template<size_t dim>
 template<typename... Args>
-inline std::ptrdiff_t MPIindex<dim>::globnD_to_glob1D(const Args&... args)
+inline std::ptrdiff_t MPIindex<dim>::globnD_to_glob1D (const Args&... args) const
 {
     return multindex.oneDindex(args...);
 }
 
 template<size_t dim>
-inline std::array<int, dim> MPIindex<dim>::glob1D_to_globnD(const std::ptrdiff_t& glob1D)
+inline std::array<int, dim> MPIindex<dim>::glob1D_to_globnD (const std::ptrdiff_t& glob1D) const
 {
     return multindex.nDindex(glob1D);
 }
 
 template<size_t dim>
 template<typename... Args>
-inline std::ptrdiff_t MPIindex<dim>::globnD_to_loc1D(const Args&... args)
+inline std::ptrdiff_t MPIindex<dim>::globnD_to_loc1D (const Args&... args) const
 {
     return multindex.oneDindex(args...) - LocalRange_1D.first;
 }
 
 template<size_t dim>
-inline std::array<int, dim> MPIindex<dim>::loc1D_to_globnD(const std::ptrdiff_t& loc1D)
+inline std::array<int, dim> MPIindex<dim>::loc1D_to_globnD (const std::ptrdiff_t& loc1D) const
 {
     assert( loc1D >= 0 && loc1D < nlocal );
     return multindex.nDindex( loc1D + LocalRange_1D.first );

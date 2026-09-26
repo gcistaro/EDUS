@@ -1,6 +1,7 @@
 #include <map>
 #include <string>
 #include <cassert>
+#include <stdexcept>
 #include "ConvertUnits.hpp"
 
 
@@ -35,5 +36,17 @@ Unit unit( const std::string& to_unit)
     if( to_unit == "aulength"    )    {return AuLength;  }
     if( to_unit == "auenergy"    )    {return AuEnergy;  }
     if( to_unit == "Rydberg"     )    {return Rydberg;     }
-    return NullUnit;
+    throw std::runtime_error("Unknown unit '" + to_unit + "'. Available units: angstrom, nanometers, nm, electronvolt, "
+                             "joule, Rydberg, wcm2, femtoseconds, fs, auintensity, autime, aulength, auenergy\n");
+}
+
+std::string type_name(const Type& type__)
+{
+    switch( type__ ) {
+        case LENGTH:    return "length";
+        case TIME:      return "time";
+        case ENERGY:    return "energy";
+        case INTENSITY: return "intensity";
+        default:        return "unknown type";
+    }
 }
