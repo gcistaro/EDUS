@@ -17,7 +17,7 @@
 /// @f]
 /// and advances it in time with DESolver. The class does not own the physical objects:
 /// it only keeps pointers to them, so they must outlive the Propagator.
-class Propagator
+class Propagator : public CommutatorEquation
 {
     private:
         PropagatorParameters parameters_;
@@ -49,17 +49,32 @@ class Propagator
         Processor processor_ = host;
 #endif
 
-        /// Initial condition for DESolver: the equilibrium density matrix
+        /// Initial condition: the equilibrium density matrix
         void initial_condition(Operator<std::complex<double>>& DM__);
-        /// Right hand side of the equation of motion, for DESolver
-        void source_term(Operator<std::complex<double>>& Output__, const double& time__,
-                        const Operator<std::complex<double>>& Input__);
+        /// omega_max*dt over the stability limit of the time stepper (must be < 1)
+        double stability_ratio_ = 0.;
+        /// Stops if the time step is too large for the stability of the time stepper
+        void check_stability();
+        /// H_ of the state at time__ for the density matrix DM__ (with its R component up to date), in R:
+        /// H0 + E.r + Sigma, with the Peierls phase if needed
+        void build_hamiltonian(const double& time__, const Operator<std::complex<double>>& DM__);
 
     public:
         Propagator() = default;
-        /// DESolver keeps callbacks bound to this object: copying or moving it would leave them dangling
+        /// DESolver keeps a pointer to this object (the equation of motion): it cannot be copied or moved
         Propagator(const Propagator&) = delete;
         Propagator& operator=(const Propagator&) = delete;
+
+        /// Right hand side of the equation of motion, for DESolver
+        void derivative(Operator<std::complex<double>>& Output__, const double& time__,
+                        const Operator<std::complex<double>>& Input__) override;
+        /// Hamiltonian of the commutator form (k component), for the Magnus time stepper
+        void hamiltonian(Operator<std::complex<double>>& H__, const double& time__,
+                         const Operator<std::complex<double>>& DM__) override;
+        /// With the Peierls phase and without decay the equation is d(rho)/dt = -i[H, rho]
+        bool commutator_form() const override { return parameters_.peierls && parameters_.decay <= 1.e-07; }
+        /// H depends on rho through the mean field
+        bool state_dependent() const override { return meanfield_->parameters().enabled; }
 
         void initialize(const PropagatorParameters& parameters__,
                         const GridStructure& gridstructure__,

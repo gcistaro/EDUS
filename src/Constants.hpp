@@ -24,8 +24,8 @@ constexpr double threshold = 1.e-08;
 
 enum Space{k,R};
 enum BandGauge{bloch, wannier};
-enum SolverType{AB, RK};
-const std::map<std::string, SolverType> solver = {{"AB", SolverType::AB}, {"RK", SolverType::RK}};
+enum SolverType{AB, RK, MAGNUS};
+const std::map<std::string, SolverType> solver = {{"AB", SolverType::AB}, {"RK", SolverType::RK}, {"Magnus", SolverType::MAGNUS}};
 
 //Global functions
 std::string LatticeVectors(const Space& space);

@@ -1,11 +1,11 @@
 #include <complex>
 #include "Operator/Operator.hpp"
-#include "DESolver.hpp"
+#include "DESolver/TimeStepper.hpp"
 
-/// @brief Specialized allocation for Operator<std::complex<double>>. We initialize fft for the auxiliary array so we allocate all the memory needed.
+/// @brief Workspace for Operator<std::complex<double>>: we initialize the fft so that all the memory needed is allocated.
 template<>
-void DESolver<Operator<std::complex<double>>>::allocate_aux(Operator<std::complex<double>>& aux__)
+void make_workspace(Operator<std::complex<double>>& w__, const Operator<std::complex<double>>& y__)
 {
-    aux__.initialize_fft(*function_);
-    aux__.lock_space(Space::k);
+    w__.initialize_fft(y__);
+    w__.lock_space(Space::k);
 }

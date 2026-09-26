@@ -1,0 +1,44 @@
+{
+    "fermienergy": 0,
+    "fermienergy_units": "electronvolt",
+    "grid": [
+        9,
+        9,
+        9
+    ],
+    "printresolution": 1,
+    "printresolution_pulse": 1,
+    "initialtime": 0,
+    "initialtime_units": "femtoseconds",
+    "dt_units": "femtoseconds",
+    "finaltime_units": "femtoseconds",
+    "tb_file": "../../tb_models/ab_initio/Si/Si_8bands_KCW",
+    "coulomb": true,
+    "filledbands": 4,
+    "method": "hsex",
+    "read_interaction": true,
+    "epsilon": 1.0,
+    "bare_file": "../../tb_models/ab_initio/Si/Si_8bands_barecoulomb_qG0.txt",
+    "screen_file": "../../tb_models/ab_initio/Si/Si_8bands_screencoulomb_qG0.txt",
+    "dt": 0.01,
+    "finaltime": 1,
+    "lasers": [
+        {
+            "intensity": 10000000000.0,
+            "intensity_units": "wcm2",
+            "frequency": 3,
+            "frequency_units": "electronvolt",
+            "polarization": [
+                1,
+                0,
+                0
+            ],
+            "cycles": 1,
+            "phase": 0,
+            "t0": 0.0,
+            "t0_units": "femtoseconds"
+        }
+    ],
+    "solver": "Magnus",
+    "order": 4
+}

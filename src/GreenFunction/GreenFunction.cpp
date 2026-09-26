@@ -39,8 +39,10 @@ void GreenFunction::initialize()
     };
     DESolverParameters desolver_parameters;
     desolver_parameters.solver = AB;
-    desolver_parameters.order = 5;
-    DEsolver_Ut_.initialize( Ut_, InitialCondition_U, SourceTerm_U, desolver_parameters );
+    desolver_parameters.order = 4;
+    InitialCondition_U(Ut_);
+    equation_Ut_ = std::make_unique<FunctionEquation<Operator<std::complex<double>>>>(SourceTerm_U);
+    DEsolver_Ut_.initialize( Ut_, *equation_Ut_, desolver_parameters );
 }
 
 void GreenFunction::Propagator(Operator<std::complex<double>>& Ut__, const double t__)

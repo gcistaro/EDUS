@@ -13,6 +13,8 @@ class GreenFunction : public Simulation
         Operator<std::complex<double>> GR_;
 
         DESolver<Operator<std::complex<double>>> DEsolver_Ut_;
+        /// Equation of motion of Ut, used by DEsolver_Ut_
+        std::unique_ptr<FunctionEquation<Operator<std::complex<double>>>> equation_Ut_;
 //        DESolver<Operator<std::complex<double>>>* DEsolver_DM_;
 
         int PrintResolution_;

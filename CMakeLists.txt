@@ -113,6 +113,7 @@ set(_SOURCES src/initialize.cpp
              src/fftPair/fftPair.cpp
              src/kGradient/kGradient.cpp
              src/DESolver/DESolver.cpp
+             src/DESolver/Magnus.cpp
              src/Simulation/Simulation.cpp
              src/core/profiler.cpp
              src/core/print_timing.cpp
@@ -278,15 +279,18 @@ add_executable(test_fft tests/test_fft.cpp)
 add_executable(test_batchfft tests/test_batchfft.cpp)
 add_executable(test_batchgemm tests/test_batchgemm.cpp)
 add_executable(test_axpby tests/test_axpby.cpp)
+add_executable(test_timestepper tests/test_timestepper.cpp)
 target_link_libraries(test_fft gtest gtest_main core)
 target_link_libraries(test_batchfft gtest gtest_main core)
 target_link_libraries(test_batchgemm gtest gtest_main core)
 target_link_libraries(test_axpby gtest gtest_main core)
+target_link_libraries(test_timestepper gtest gtest_main core)
 include(GoogleTest)
 gtest_discover_tests(test_fft)
 gtest_discover_tests(test_batchfft)
 gtest_discover_tests(test_batchgemm)
 gtest_discover_tests(test_axpby)
+gtest_discover_tests(test_timestepper)
 
 #add armadillo
 #find_package(Armadillo REQUIRED)
@@ -343,9 +347,14 @@ add_test(NAME hBN_IPA    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME hBN_HSEX   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX   2)
 add_test(NAME Si_DFT_IPA COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_DFT_IPA 1)
 add_test(NAME Si_IPA     COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA     2)
+# relaxation towards equilibrium (checked also against the analytic exponential decay)
+add_test(NAME Si_IPA_decay COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA_decay 2)
 # initial time before the laser
 add_test(NAME Si_IPA_initialtime COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA_initialtime 1)
 add_test(NAME Si_HSEX    COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_HSEX    2)
+# Magnus time stepper (commutator-free, order 4), without and with the mean field
+add_test(NAME Si_IPA_Magnus  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_IPA_Magnus  2)
+add_test(NAME Si_HSEX_Magnus COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh Si_HSEX_Magnus 2)
 # the gradient in k space works only with 1 MPI rank
 add_test(NAME GaAs_IPA   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_IPA   1)
 add_test(NAME GaAs_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh GaAs_HSEX  2)

@@ -78,6 +78,11 @@ jobs:
         run: |
           cmake --build build -j$(nproc) 
 
+      - name: Run unit tests of the time steppers
+        run: |
+          cd build
+          ctest -R "^(TimeStepperTest|MagnusTest)" --output-on-failure
+
       - name: Run hBN_IPA test
         env:
           MPIEXEC_FLAGS: --oversubscribe
@@ -106,6 +111,13 @@ jobs:
           cd build
           ctest -R "^Si_IPA$" --output-on-failure
 
+      - name: Run Si_IPA_decay test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_IPA_decay$" --output-on-failure
+
       - name: Run Si_IPA_initialtime test
         env:
           MPIEXEC_FLAGS: --oversubscribe
@@ -119,6 +131,20 @@ jobs:
         run: |
           cd build
           ctest -R "^Si_HSEX$" --output-on-failure
+
+      - name: Run Si_IPA_Magnus test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_IPA_Magnus$" --output-on-failure
+
+      - name: Run Si_HSEX_Magnus test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^Si_HSEX_Magnus$" --output-on-failure
 
       - name: Run GaAs_IPA test
         env:

@@ -194,14 +194,13 @@
             "default": "RK",
             "enum": [
                 "RK",
-                "AB"
-            ],
+                "AB", "Magnus"],
             "title": "Solver used for time propagation of the Density Matrix"
         },
         "order": {
             "type": "integer",
             "default": 4,
-            "title": "Order of the Solver used for time propagation of the Density Matrix"
+            "title": "Order of the Solver used for time propagation of the Density Matrix: 4 for RK, 3 or 4 for AB, 4 for Magnus"
         },
         "peierls": {
             "type": "boolean",

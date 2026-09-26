@@ -90,6 +90,9 @@ done
 # ─────────────────────────────────────────────
 if ! grep -q '"decay"' "${INPUT}"; then
     python3 "${PROJECT_ROOT}/ci-test/check_energy.py" Output/Energy.txt || num_failures=$((num_failures+1))
+else
+    # with decay the energy is not conserved: analytic check of the relaxation after the pulses
+    python3 "${PROJECT_ROOT}/ci-test/check_decay.py" "${INPUT}" Output || num_failures=$((num_failures+1))
 fi
 
 if [ ${num_failures} -ne 0 ]; then

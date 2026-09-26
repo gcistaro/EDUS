@@ -1,9 +1,8 @@
 #include "ConvertUnits.hpp"
 #include "Propagator/Propagator.hpp"
 
-/// @brief Sets the pointers to the physical objects and initializes DESolver.
-/// DESolver::initialize evaluates immediately the initial condition, so the density matrix in the state
-/// is set to the equilibrium one at the end of this function.
+/// @brief Sets the pointers to the physical objects, sets the density matrix to the equilibrium one
+/// and initializes DESolver.
 void Propagator::initialize(const PropagatorParameters& parameters__,
                             const GridStructure& gridstructure__,
                             const electron::System& system__,
@@ -31,12 +30,47 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         }
     }
 
-    desolver_.initialize(state_->DensityMatrix(),
-        [this](Operator<std::complex<double>>& DM__) { initial_condition(DM__); },
-        [this](Operator<std::complex<double>>& Output__, const double& time__, const Operator<std::complex<double>>& Input__) {
-            source_term(Output__, time__, Input__);
-        },
-        parameters_.desolver);
+    initial_condition(state_->DensityMatrix());
+    desolver_.initialize(state_->DensityMatrix(), *this, parameters_.desolver);
+    check_stability();
+}
+
+/// @brief The eigenvalues of the equation of motion are -i(e_n(k) - e_m(k)): the time step must keep
+/// omega_max*dt inside the stability region of the time stepper, with omega_max the largest difference
+/// of band energies at the same k. The mean field and the field modify the spectrum a little:
+/// a margin is kept, with a warning close to the limit.
+void Propagator::check_stability()
+{
+    double omega_max = 0.;
+    for( auto& energies : system_->bandstructure().energies() ) {
+        double e_min = energies(0), e_max = energies(0);
+        for( int ib = 0; ib < energies.get_Size(0); ++ib ) {
+            e_min = std::min(e_min, energies(ib));
+            e_max = std::max(e_max, energies(ib));
+        }
+        omega_max = std::max(omega_max, e_max - e_min);
+    }
+#ifdef EDUS_MPI
+    MPI_Allreduce(MPI_IN_PLACE, &omega_max, 1, MPI_DOUBLE, MPI_MAX, mpi::Communicator::world().communicator());
+#endif
+    auto& stepper = desolver_.stepper();
+    double dt = parameters_.desolver.dt;
+    double ratio = omega_max * dt / stepper.stability_limit();
+    stability_ratio_ = ratio;
+    if( ratio > 1. ) {
+        std::stringstream ss;
+        ss << "The time step is too large for " << stepper.name() << ": omega_max*dt = " << omega_max * dt
+           << ", stable only below " << stepper.stability_limit() << " (omega_max = "
+           << Convert(omega_max, AuEnergy, ElectronVolt) << " eV, largest difference of band energies). "
+           << "Use dt < " << 0.8 * stepper.stability_limit() / omega_max << " a.u. = "
+           << Convert(0.8 * stepper.stability_limit() / omega_max, AuTime, FemtoSeconds) << " fs"
+           << (stepper.name() == "RK4" ? "" : " or the solver RK") << "\n";
+        throw std::runtime_error(ss.str());
+    }
+    if( ratio > 0.8 ) {
+        output::print("WARNING: omega_max*dt is ", ratio * 100., " % of the stability limit of ", stepper.name(),
+                      ": the mean field can move it beyond, consider a smaller dt");
+    }
 }
 
 void Propagator::step()
@@ -49,8 +83,8 @@ void Propagator::print_recap() const
 {
     output::title("PROPAGATOR");
     auto& desolver = parameters_.desolver;
-    output::print("Solver                   *", std::string(8, ' '), (desolver.solver == SolverType::RK ? "RK" : "AB"));
-    output::print("Order                    *", desolver.order);
+    output::print("Solver                   *", std::string(8, ' '), desolver_.stepper().name());
+    output::print("omega_max*dt / limit     *", stability_ratio_);
     output::print("Resolution time          *", desolver.dt, " a.u.", Convert(desolver.dt, AuTime, FemtoSeconds), " fs");
     output::print("Initial time             *", desolver.initial_time, " a.u.",
                                                 Convert(desolver.initial_time, AuTime, FemtoSeconds), " fs");
@@ -95,7 +129,7 @@ void Propagator::initial_condition(Operator<std::complex<double>>& DM__)
 /// @param Output__ We store here @f$ \frac{\partial \rho}{\partial t} @f$
 /// @param time__ Current time of the simulation, to calculate the time dependent hamiltonian and the laser
 /// @param Input__ Input density matrix, to be used as the density matrix on the RHS of the equation
-void Propagator::source_term(Operator<std::complex<double>>& Output__, const double& time__,
+void Propagator::derivative(Operator<std::complex<double>>& Output__, const double& time__,
                             const Operator<std::complex<double>>& Input__)
 {
     auto& H_ = state_->H();
@@ -116,24 +150,7 @@ void Propagator::source_term(Operator<std::complex<double>>& Output__, const dou
                         (*lasers_)(time__), false);
     }
 
-    /* IPA Hamiltonian H_ = H0_ + E \cdot r*/
-    ipa_hamiltonian(time__);
-
-    /* Coulomb interaction H_ += \Sigma^H[\rho] + \Sigma^{SEX}[\rho] */
-    H_.go_to_R();
-
-    if(parameters_.peierls) {
-        copy(Input__.get_Operator(R), aux_DM_.get_Operator(R), processor_);
-        aux_DM_.lock_space(R);
-        apply_peierls_phase(aux_DM_, time__, -1, processor_);
-    }
-    auto& DM = parameters_.peierls ? aux_DM_ : Input__;
-    meanfield_->self_energy(H_, DM, system_->DM0());
-
-    /* Peierls transformation H_(R) = H_(R)*exp(+i*A(t) \cdot R) */
-    if(parameters_.peierls) {
-        apply_peierls_phase(H_, time__, +1, processor_);
-    }
+    build_hamiltonian(time__, Input__);
 
     /* Output__ += -i * [ H_, Input__ ] */
     Output__.go_to_k();
@@ -145,30 +162,70 @@ void Propagator::source_term(Operator<std::complex<double>>& Output__, const dou
 
     commutator(Output, -im, H, Input, false, processor_);
 
-    /* apply decay in time */
+    /* decay towards equilibrium: d(rho)/dt += -(rho - rho0)/decay.
+       In the Peierls gauge the propagated density matrix is phase(+1)*rho, so the equilibrium one is
+       phase(+1)*rho0: the phase is applied to rho0 (in R) and everything stays in k, like without decay */
     if( parameters_.decay > 1.e-07 ) {
-        auto& DM0k = system_->DM0().get_Operator(Space::k);
-
+        const BlockMatrix<std::complex<double>>* DM0k = &system_->DM0().get_Operator(Space::k);
         if(parameters_.peierls) {
-            apply_peierls_phase(Output__, time__, -1, processor_);
+            copy(system_->DM0().get_Operator(R), aux_DM_.get_Operator(R), processor_);
+            aux_DM_.lock_space(R);
+            apply_peierls_phase(aux_DM_, time__, +1, processor_);
+            aux_DM_.go_to_k();
+            DM0k = &aux_DM_.get_Operator(Space::k);
         }
-
-        Output__.go_to_k();
         #pragma omp parallel for
         for(int ik=0; ik<Input.get_nblocks(); ik++) {
             for(int irow=0; irow < Input.get_nrows(); irow++ ) {
                 for(int icol=0; icol < Input.get_ncols(); icol++) {
-                    Output(ik,irow,icol) -= ( DM.get_Operator(k)(ik,irow,icol)-DM0k(ik,irow,icol) )/parameters_.decay;
+                    Output(ik,irow,icol) -= ( Input(ik,irow,icol)-(*DM0k)(ik,irow,icol) )/parameters_.decay;
                 }
             }
-        }
-        if(parameters_.peierls) {
-            apply_peierls_phase(Output__, time__, +1, processor_);
         }
     }
     //TODO: these two lines come from the old code, they look like a leftover of gpu debugging
     Output__.get_Operator(k).transfer_to(host);
     Output__.get_Operator(k).set_processor(device);
+}
+
+void Propagator::build_hamiltonian(const double& time__, const Operator<std::complex<double>>& DM__)
+{
+    auto& H_ = state_->H();
+    auto& aux_DM_ = state_->aux_DM();
+
+    /* IPA Hamiltonian H_ = H0_ + E \cdot r*/
+    ipa_hamiltonian(time__);
+
+    /* Coulomb interaction H_ += \Sigma^H[\rho] + \Sigma^{SEX}[\rho] */
+    H_.go_to_R();
+
+    if(parameters_.peierls) {
+        copy(DM__.get_Operator(R), aux_DM_.get_Operator(R), processor_);
+        aux_DM_.lock_space(R);
+        apply_peierls_phase(aux_DM_, time__, -1, processor_);
+    }
+    auto& DM = parameters_.peierls ? aux_DM_ : DM__;
+    meanfield_->self_energy(H_, DM, system_->DM0());
+
+    /* Peierls transformation H_(R) = H_(R)*exp(+i*A(t) \cdot R) */
+    if(parameters_.peierls) {
+        apply_peierls_phase(H_, time__, +1, processor_);
+    }
+}
+
+/// @brief Hamiltonian of the equation in commutator form, d(rho)/dt = -i[H, rho] (Peierls gauge, no decay):
+/// the same H used by derivative, in k.
+void Propagator::hamiltonian(Operator<std::complex<double>>& H__, const double& time__,
+                             const Operator<std::complex<double>>& DM__)
+{
+    /* align the R component of the density matrix, needed by the mean field */
+    const_cast<Operator<std::complex<double>>&>(DM__).go_to_R(true);
+    build_hamiltonian(time__, DM__);
+    auto& H_ = state_->H();
+    H_.go_to_k();
+    auto& Hk = H_.get_Operator(Space::k);
+    std::copy(Hk.begin(), Hk.end(), H__.get_Operator(Space::k).begin());
+    H__.lock_space(Space::k);
 }
 
 void ipa_hamiltonian_cpu( BlockMatrix<std::complex<double>>& H,

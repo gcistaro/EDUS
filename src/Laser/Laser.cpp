@@ -135,9 +135,10 @@ Coordinate Laser::operator()(const double& Time)
 
 Coordinate Laser::VectorPotential(const double& Time)
 {
-    /* go from previous_Time to Time in n=2 steps */
+    /* go from previous_Time to Time with Simpson's rule; Time can also precede previous_Time
+       (e.g. the stages of a predictor-corrector time stepper): then the integral is done backwards */
     double deltaT = Time - previous_Time; 
-    if(deltaT < 1.e-07) return A; 
+    if(std::abs(deltaT) < 1.e-07) return A; 
     auto E1 = this->operator()(previous_Time);
     auto E2 = this->operator()(previous_Time + deltaT/2.);
     auto E3 = this->operator()(Time);
