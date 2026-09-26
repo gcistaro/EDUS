@@ -249,6 +249,12 @@ Python scripts in [`Postproces/`](Postproces):
 | `RytovaKeldysh.py` | Rytova–Keldysh potential for a Wannier90 model |
 | `hermitize_tb.py` | Makes a `seedname_tb.dat` file exactly Hermitian |
 
+### Wavefunctions in the Wannier basis
+
+`EDUS_wfc2wannier input.json` reads the wavefunctions of Quantum ESPRESSO (`wfc*.dat`) and rotates them with
+`seedname_u.mat`/`seedname_u_dis.mat` of wannier90: it writes the Bloch functions in the Wannier gauge and the
+Wannier functions in real space (XSF). See [`docs/wfc2wannier.md`](docs/wfc2wannier.md).
+
 ---
 
 ## Versions

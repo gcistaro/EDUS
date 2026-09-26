@@ -109,6 +109,9 @@ set(_SOURCES src/initialize.cpp
              src/Wannier/Wannier.cpp
              src/Wannier/ReadWannier.cpp
              src/Wannier/PrintWannier.cpp
+             src/Wannier/QEWavefunction.cpp
+             src/Wannier/WannierGauge.cpp
+             src/Wannier/WannierWavefunctions.cpp
              src/Laser/Laser.cpp
              src/fftPair/fftPair.cpp
              src/kGradient/kGradient.cpp
@@ -261,6 +264,10 @@ target_include_directories(core PUBLIC ${FFTW_INCLUDE_DIRS})
 add_executable(EDUS src/EDUS.cpp)
 target_link_libraries(EDUS PRIVATE core)
 
+# QE wavefunctions -> Wannier gauge (u.mat, u_dis.mat of wannier90)
+add_executable(EDUS_wfc2wannier src/wfc2wannier.cpp)
+target_link_libraries(EDUS_wfc2wannier PRIVATE core)
+
 
 # Google test
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -315,7 +322,7 @@ gtest_discover_tests(test_axpby)
 #add_executable(ScreenedPotential ci-test/test_Response.cpp)
 
 
-install (TARGETS EDUS PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_BINDIR})
+install (TARGETS EDUS EDUS_wfc2wannier PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_BINDIR})
 #build for ctest
 enable_testing()
 #add_test(NAME Containers_test COMMAND Containers_test)
@@ -357,6 +364,9 @@ add_test(NAME MoS2_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME hBN_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX 4)
 add_test(NAME LiF_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX 4)
 set_tests_properties(hBN_HSEX_np4 LiF_HSEX_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+# QE -> Wannier rotation of the wavefunctions on synthetic data (Gaussian Wannier functions)
+add_test(NAME wfc2wannier     COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/wfc2wannier/run_test.sh $<TARGET_FILE:EDUS_wfc2wannier> 1)
+add_test(NAME wfc2wannier_np2 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/wfc2wannier/run_test.sh $<TARGET_FILE:EDUS_wfc2wannier> 2)
 ############
 ############add_test(NAME MPI_hBN COMMAND
 ############          bash -c "mkdir ${CMAKE_SOURCE_DIR}/CTEST; 
