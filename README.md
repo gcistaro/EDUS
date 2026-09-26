@@ -1,187 +1,260 @@
-[![Static Badge](https://img.shields.io/badge/DOI-10.1021%2Facs.jctc.2c00674-blue?style=flat&logo=DOI)
-](https://doi.org/10.1021/acs.jctc.2c00674)
+<p align="center">
+  <img src="assets/logo/animated/github-banner.gif" alt="EDUS - Electron Dynamics and Ultrafast Spectroscopy" width="640">
+</p>
 
-# EDUS - Electron Dynamics and Ultrafast Spectroscopy
+[![DOI](https://img.shields.io/badge/DOI-10.1021%2Facs.jctc.2c00674-blue?style=flat&logo=DOI)](https://doi.org/10.1021/acs.jctc.2c00674)
+[![arXiv](https://img.shields.io/badge/arXiv-2608.16226-b31b1b?style=flat&logo=arxiv)](https://arxiv.org/abs/2608.16226)
+[![Release](https://img.shields.io/github/v/release/gcistaro/EDUS?style=flat)](https://github.com/gcistaro/EDUS/releases)
+[![CI](https://github.com/gcistaro/EDUS/actions/workflows/ci.yml/badge.svg)](https://github.com/gcistaro/EDUS/actions/workflows/ci.yml)
 
-This code can be used to propagate the electronic density matrix of an extended system up to HSEX level. It can simulate the interaction of the system with a (classical) electric field. \
-The equations we solve are:<br />
-   $`i{{\partial \rho(\textbf{k})}\over{\partial t}} = \Big[ H_0(k) +E(t)\cdot \xi(k) + H_{ee}(k), \rho(k)\Big] + i E(t)\cdot \nabla_k \rho(k)`$
+# EDUS — Electron Dynamics and Ultrafast Spectroscopy
 
-The theory behind the code plus details about the implementation can be found in our paper [Theoretical Approach for Electron Dynamics and Ultrafast Spectroscopy (EDUS)](https://doi.org/10.1021/acs.jctc.2c00674). If you find our paper or the code useful, please consider citing us.
+EDUS propagates in time the electronic density matrix of an extended system interacting with a classical electric field, at the independent-particle (IPA), RPA or HSEX level. It starts from a Wannier90 tight-binding model and can take the screened Coulomb interaction directly from first principles.
+
+The equations of motion solved in the Wannier gauge are
+
+$$
+i \frac{\partial \rho(\mathbf k)}{\partial t} = \Big[ H_0(\mathbf k) + \mathbf E(t)\cdot \boldsymbol\xi(\mathbf k) + \Sigma[\Delta\rho](\mathbf k), \rho(\mathbf k)\Big] + i \mathbf E(t)\cdot \nabla_{\mathbf k} \rho(\mathbf k)
+$$
+
+where $H_0$ is the tight-binding Hamiltonian, $\boldsymbol\xi$ the position operator and $\Sigma$ the mean-field self energy (Hartree and/or screened exchange), which depends on the variation of the density matrix with respect to the ground state, $\Delta\rho = \rho - \rho_0$.
+
+## Features
+
+- **Ab-initio input**: tight-binding Hamiltonian and position operator from a Wannier90 `seedname_tb.dat` file.
+- **Levels of theory**: IPA, RPA (Hartree) and HSEX (Hartree + screened exchange).
+- **Electron–electron interaction**:
+  - *ab initio*: bare and screened Coulomb interactions computed with the KCW code of Quantum ESPRESSO;
+  - *model*: Rytova–Keldysh (2D) or 3D Coulomb potential with a dielectric constant.
+- **Lasers**: any number of sin² pulses, with intensity, frequency (or wavelength), polarization, delay and phase.
+- **Observables**: velocity (current), absorption spectra, band and Wannier populations, energy balance and work of the field, projected DOS, band structure.
+- **Performance**: MPI parallelization over k points, optional OpenMP threads and GPU (CUDA) support.
+
+## Citing EDUS
+
+If you use EDUS in your work, please cite:
+
+- G. Cistaro *et al.*, *Theoretical Approach for Electron Dynamics and Ultrafast Spectroscopy (EDUS)*, J. Chem. Theory Comput., [doi:10.1021/acs.jctc.2c00674](https://doi.org/10.1021/acs.jctc.2c00674)
+- [arXiv:2608.16226](https://arxiv.org/abs/2608.16226), for the ab-initio screening and the version 1.x of the code
+
+and the version of the code you used (see [Releases](https://github.com/gcistaro/EDUS/releases)).
 
 ---
 
-## Building instructions
-#### Requirements
-Basics:
-```bash
-gcc13
-cmake
-git
-```
-#### Link dependencies
-    • MKL (for lapack/blas routines, eventually for fftw)
-    • MPI (openmpi/mpich)
-    • fftw (mpi version if you want to compile with mpi)
-    • hdf5 (for outputing results in an output.h5 data file) 
-    • python3 + numpy (at runtime, for building the RytovaKeldysh potential)
+## Installation
 
-It is important to note that the `mpi`, `fftw`, and `hdf5` must have matching version numbers. I.e.,
-```bash
-gcc/13.2.0
-openmpi_gcc/5.0.2_gcc13.2.0
-fftw/3.3.10_mpi5_gcc13
-hdf5/1.14.3_gcc13_mpi5
-```
+### Requirements
 
-Additionally, the load order is important for compilation. Ideally, the modules should be loaded as  
+- C++17 compiler (e.g. GCC ≥ 12) and CMake
+- MPI (OpenMPI or MPICH)
+- FFTW3 (with its MPI version when compiling with MPI)
+- BLAS/LAPACK/LAPACKE (e.g. OpenBLAS), or Intel MKL
+- *optional*: HDF5 (to write large matrices in `output.h5`), CUDA (GPU support)
+- Python 3 with `numpy` and `scipy` (model potentials and post-processing); `matplotlib`, `h5py` for some post-processing scripts
+
+When using modules on a cluster, MPI, FFTW and HDF5 must be built with the same compiler and MPI, for example:
+
 ```bash
 module purge
-module load python/3.11.4 gcc/13.2.0 intel/2022.3 openmpi_gcc/5.0.2_gcc13.2.0 fftw/3.3.10_mpi5_gcc13 hdf5/1.14.3_gcc13_mpi5
+module load gcc/13.2.0 openmpi_gcc/5.0.2_gcc13.2.0 fftw/3.3.10_mpi5_gcc13 hdf5/1.14.3_gcc13_mpi5 python/3.11.4
 ```
 
+### Building with CMake
 
-#### Building
-For all distros:
+The ab-initio models used by the tests are in a git submodule ([EDUS-models](https://github.com/gcistaro/EDUS-models)), so clone with `--recurse-submodules`:
+
 ```bash
-git clone https://github.com/gcistaro/EDUS_2.0.git
-cd EDUS_2.0
-mkdir build; cd build
+git clone --recurse-submodules https://github.com/gcistaro/EDUS.git
+cd EDUS
+mkdir build && cd build
 cmake ..
-make
+make -j
 ctest
 ```
-#### Building with spack
-To install EDUS with SPACK, first of all you need a version of spack in your computer
+
+The main CMake options (`cmake -D<OPTION>=ON ..`):
+
+| Option | Default | Description |
+|---|---|---|
+| `EDUS_MPI` | `ON` | MPI parallelization |
+| `EDUS_MKL` | `OFF` | Use Intel MKL for BLAS/LAPACK |
+| `EDUS_GPU` | `OFF` | GPU support (CUDA) |
+| `EDUS_HDF5` | `OFF` | Link HDF5 to write large matrices in `output.h5` |
+| `EDUS_FFTWTHREADS` | `OFF` | Threads in FFTW |
+| `EDUS_MKL_THREAD` | `OFF` | Threads in MKL |
+| `EDUS_BATCHGEMM` | `OFF` | Batched GEMM for the k-point matrix multiplications |
+| `EDUS_PROFILE` | `ON` | Timings of the functions |
+
+### Building with Spack
+
+<details>
+<summary>Click to expand</summary>
+
+Get Spack and set it up:
+
 ```bash
 git clone -c feature.manyFiles=true https://github.com/spack/spack.git ~/spack
-cd spack
-git checkout v0.23.1
-```
-And need to source the setup file in spack: 
-```bash
+cd ~/spack && git checkout v0.23.1
 . ~/spack/share/spack/setup-env.sh
-```
-Now spack is available. Try to find some packages that are usually already installed
-```bash
 spack external find autoconf automake git libtool m4 perl tar
 spack compiler add
 ```
-Now that you have spack, you can create a new environment. For example, create a folder:
-```bash
-cd
-mkdir envs
-cd envs
-mkdir EDUS
-cd EDUS
-```
-This will be the folder with your environment. Inside it, create a file called spack.yaml and inside copy this:
-```bash
-# This is a Spack Environment file.
-#
-# It describes a set of packages to be installed, along with
-# configuration settings.
+
+Create a folder for the environment (e.g. `~/envs/EDUS`) with a `spack.yaml` file inside, replacing `/path/to/EDUS` with the path of your clone:
+
+```yaml
 spack:
-  # add package specs to the `specs` list
   specs:
-  - EDUS@1.0%gcc@12.3.0 build_type=Debug
+  - edus@1.0 build_type=Release
   view: true
   concretizer:
     unify: true
   develop:
-    EDUS:
-      path: /users/gcistaro/codes/EDUS_2.0
-      spec: EDUS@1.0
+    edus:
+      path: /path/to/EDUS
+      spec: edus@1.0
   repos:
-  - /users/gcistaro/codes/EDUS_2.0/spack/
+  - /path/to/EDUS/spack/
 ```
-Be careful to change your path with the one of the code. 
-Activate the environment you have just created and concretize it:
+
+Then activate the environment, concretize and install:
+
 ```bash
 spacktivate . -p
-spack concretize 
+spack concretize
+spack install -v
 ```
 
-After this is done, you can install.
+</details>
+
+---
+
+## Quick start
+
+EDUS reads a single JSON input file:
 
 ```bash
-spack install -v 
+mpirun -np 4 ./build/EDUS input.json > output.log 2> output.err
 ```
 
----
+A minimal input for an IPA calculation with one laser pulse:
 
-## Input file
-Sample input files can be found in `<repository>/ci-test/inputs`. For now you need to define all the variables, we will soon assign default values to many of the variables. 
-
-Currently, the code only supports reading the coulomb interaction from a file. This file is created automatically when the computation starts by calling the script `PostProces/RytovaKeldysh.py` using the screening length $`r_0`$ (in Angstrom) and the dielectric constant of the surrounding medium $`\epsilon`$ (dimensionless) as defined in the input file. 
-
-[comment]: # (by calling it as `PostProces/RytovaKeldysh.py <nk1> <nk2> <nk3> file_tb.dat`, where `<nk1> <nk2> <nk3>` are the number of kpoints in each cartesian direction and `file_tb.dat` is the Wannier90 output that will be used in the computation. )
-
-## Add new variable to the json file
-First, modify src/InputVariables/input_schema.json. 
-You need to specify the name of the variable, the variable type under the section "type" (ex. "string", "number", "array").
-We also suggest to put a default value for it that the code will take if the input parameter is not specified in the input, and a description under the section "title".
-After this, you can modify the config.hpp class adding your new input variable. you need to add two more methods in this format:
-```///<title>
-    inline auto <parameter-name>() const
-    {
-        return dict_.at("/<parameter-name>"_json_pointer).get<<parameter-type>>();
-    }
-    inline void <parameter-name>(<parameter-type> <parameter-name>__)
-    {
-        if (dict_.contains("locked")) {
-            throw std::runtime_error(locked_msg);
+```json
+{
+    "tb_file": "path/to/seedname",
+    "filledbands": 4,
+    "grid": [9, 9, 9],
+    "dt": 0.01,
+    "dt_units": "femtoseconds",
+    "finaltime": 20,
+    "finaltime_units": "femtoseconds",
+    "lasers": [
+        {
+            "intensity": 1e10,
+            "intensity_units": "wcm2",
+            "frequency": 3,
+            "frequency_units": "electronvolt",
+            "polarization": [1, 0, 0],
+            "cycles": 5,
+            "t0": 0.0,
+            "t0_units": "femtoseconds"
         }
-        dict_["/<parameter-name>"_json_pointer] = <parameter-name>__;
-    }
+    ]
+}
 ```
-Now that you defined it, make sure the parameter is used in the Simulation class to do what it is supposed to do.
-(if not, it will just be read and ignored).
-It would be nice that you also print it in print_recap in Simulation.cpp to keep track of it.
+
+More examples (Si, GaAs, LiF, hBN, MoS2; IPA and HSEX) are in [`ci-test/inputs`](ci-test/inputs).
 
 ---
 
-## Usage
+## Input
 
-Upon building, the EDUS executable will be inside the build directory. For a generic `input.json.in` file, EDUS can be run from the root of the project as
+All the variables, with their default values and allowed units, are defined in [`src/InputVariables/input_schema.json`](src/InputVariables/input_schema.json). Variables that are not recognized are reported at the beginning of the run, with a suggestion for the closest valid name.
+
+The most important ones:
+
+| Variable | Description |
+|---|---|
+| `tb_file` | Wannier90 tight-binding file (`seedname_tb.dat`) |
+| `filledbands` | Number of filled bands |
+| `grid` | k-point grid (the same grid is used in R space) |
+| `dt`, `initialtime`, `finaltime` | Time step, initial and final time (each with its `_units`) |
+| `solver`, `order` | Time-propagation scheme (default: Runge–Kutta, order 4) |
+| `lasers` | List of laser pulses |
+| `coulomb`, `method` | Interactions on/off; `ipa`, `rpa` or `hsex` |
+| `decay` | Phenomenological decay rate of the density matrix |
+| `printresolution` | Print observables every N time steps |
+| `kpath` | Path in k space where the band structure is printed |
+| `opengap` | Scissor operator added to the gap |
+
+### Electron–electron interaction
+
+With `"coulomb": true` the interaction enters through the self energy Σ, according to `method` (`rpa` or `hsex`). The Coulomb potential can be:
+
+- **ab initio** (`"read_interaction": true`): the bare and screened interactions are read from `bare_file` and `screen_file`, written by the KCW code of Quantum ESPRESSO as matrix elements in the Wannier basis on a set of R vectors;
+- **model** (`"read_interaction": false`): chosen with `coulomb_model`:
+  - `rytova_keldysh`: Rytova–Keldysh potential for 2D materials, with screening length `r0` and dielectric constant `epsilon` of the environment;
+  - `vcoul3d`: 3D Coulomb potential screened by `epsilon`.
+
+### Band structure
+
+To print the band structure along a path, add the vertices in crystal coordinates:
+
+```json
+"kpath": [ [0.000, 0.000, 0.000],
+           [0.500, 0.500, 0.000],
+           [0.333, 0.667, 0.000],
+           [0.000, 0.000, 0.000] ]
 ```
-./build/EDUS ./path/to/input.json.in 1> output.log 2> output.err
+
+This writes `BANDSTRUCTURE.txt` and `plotbands.gnu`; plot it with `gnuplot plotbands.gnu`.
+
+### Scissor operator
+
+`opengap` rigidly shifts the valence bands down by `opengap/2` and the conduction bands up by `opengap/2`, without changing the eigenvectors:
+
+```json
+"opengap": 1.0,
+"opengap_units": "electronvolt"
 ```
+
+EDUS then writes a `wannier_tb.dat` file with the corrected Hamiltonian, which can be used to restart the simulation.
 
 ---
-### Print band dispersion
-EDUS can be used to print band dispersions when a simulation is performed. To do that, you need to define an array of arrays 
-in the input json like this one: 
-```
-    "kpath": [ [0.000, 0.000, 0.000],
-               [0.500, 0.500, 0.000],
-               [0.333, 0.667, 0.000],
-               [0.000, 0.000, 0.000] ]
 
-```
-N.B.: only crystal coordinates are supported for now. This will create a file `BANDSTRUCTURE.txt` and a file to plot it
-`plotbands.gnu`. To get a visualization of the bandstructure, just type in the terminal:
-```
-gnuplot plotbands.gnu
-```
+## Output
 
-### Open gap using scissor operator
-You can open the gap using a simple scissor operator that does not change the eigenvectors, but only pushes the bands away from each others using the desired gap. The way to do it is to simply add a parameter in the json file: 
-```
-"gap" : 10.0,
-```
-this line pushes the bands until they are not at 10 eV of distance. 
+The time-dependent observables are written in the `Output/` folder:
+
+| File | Content |
+|---|---|
+| `Time.txt` | Time steps |
+| `Laser.txt`, `Laser_A.txt` | Electric field and vector potential of the lasers |
+| `Velocity.txt` | Velocity (current) of the electrons |
+| `Energy.txt` | Band and mean-field energy, power and work of the field |
+| `Population.txt`, `Population_wannier.txt` | Populations in the band and in the Wannier basis |
+
+Other files: `pdos.txt` (projected DOS), `BANDSTRUCTURE.txt` (if `kpath` is given) and `output.h5` (large matrices, selected with `toprint`, when compiled with HDF5).
+
+### Post-processing
+
+Python scripts in [`Postproces/`](Postproces):
+
+| Script | Description |
+|---|---|
+| `Absorbance.py` | Absorption spectrum from the velocity |
+| `HHG.py` | High-harmonic generation spectrum |
+| `Velocity_fft.py` | Fourier transform of the velocity |
+| `Recap.py` | Plots of the main observables |
+| `RytovaKeldysh.py` | Rytova–Keldysh potential for a Wannier90 model |
+| `hermitize_tb.py` | Makes a `seedname_tb.dat` file exactly Hermitian |
+
 ---
 
-## Adding new code
-1. Before adding something new, make sure you are not repeating something is already there.
-2. To add new code, create a new class, unless you don’t just want to add some features (methods) in a class that already exists. Whenever you want to push something in the remote folder, do not do it in the main branch, but create a new branch with small changes, only related to what you want to add. When you are done with the changes, the first step is to make sure that you did not break old parts of the code, unless you did not find a bug. So, make everything and run ctest. If your tests are failing, consider what you changed in the “old” code that was working before. 
-3. To create a new branch, give meaningful names, so that if it stays there for years we will remember what we were doing in that branch.
-4. IMPORTANT:  push only the files you want to really to change. To see what you changed, you can use the terminal command git status. If something changed and you did not change it, you can run `git diff <file>`, that will compare your local file with the remote one. If you did some changes (even spaces) that are not needed, you can restore the remote file with `git restore <file>`.
-5. After your changes are done, create a pull request and we will add them in main.
+## Versions
 
-### Adding a class
-If you want to add a class from scratch, you need to add to the code two different files:
-1. A header file .hpp, that you will link to all the parts of the code that need your class using `#include <”file”.hpp>`. This class contains the declaration of your class together with the declaration of all the methods. “Declaration” means a line where you define return type, name, arguments but never their definition. This will be included in many parts of the code, so make sure it will be compiled only once with #ifdef.
-2. A source file .cpp, which contains the actual code to be used. You need to add this file in the list of __SOURCES in CMakeLists.txt so it will be compiled as an object file with the code. In this file you need to write the definition of everything you just declared in your .hpp file. 
+EDUS follows [semantic versioning](https://semver.org). The list of changes of each version is in [`docs/releases`](docs/releases) and on the [Releases](https://github.com/gcistaro/EDUS/releases) page.
 
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and the code structure.
