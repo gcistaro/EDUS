@@ -40,6 +40,15 @@ class OutputManager
         int index_h5_ = 0;
         /// Workspace for the velocity
         BlockMatrix<std::complex<double>> temp_;
+        /// Workspace for the energy balance: self energy and its gradient
+        Operator<std::complex<double>> sigma_;
+        Operator<std::complex<double>> grad_sigma_;
+        /// Energy balance: work done by the field up to the last print step, and power and time at that step
+        double work_ = 0.;
+        double last_power_ = 0.;
+        double last_time_ = 0.;
+        double initial_energy_ = 0.;
+        bool first_energy_step_ = true;
 
         std::ofstream os_time_;
         std::ofstream os_laser_;
@@ -47,6 +56,7 @@ class OutputManager
         std::ofstream os_pop_;
         std::ofstream os_pop_wannier_;
         std::ofstream os_velocity_;
+        std::ofstream os_energy_;
 
         std::string path(const std::string& filename__) const { return parameters_.directory + "/" + filename__; }
         /// True if at time__ we print (use_sparse__=true: resolution depends on whether a laser is on)
@@ -54,7 +64,8 @@ class OutputManager
         /// Copies the density matrix in aux_DM, removing the Peierls phase if needed
         void copy_DM_to_aux(const double& time__);
         void print_population(const double& time__, const BandGauge& bandgauge__);
-        void print_velocity(const double& time__);
+        /// Velocity (with the self energy) in Velocity.txt and energy balance in Energy.txt
+        void print_velocity_energy(const double& time__);
         void initialize_h5(nlohmann::json dict__, const GridStructure& gridstructure__);
         void write_h5(const double& time__);
 

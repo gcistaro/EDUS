@@ -1,6 +1,7 @@
 #ifndef PROPAGATOR_PARAMETERS_HPP
 #define PROPAGATOR_PARAMETERS_HPP
 
+#include <stdexcept>
 #include "Constants.hpp"
 #include "DESolver/DESolverParameters.hpp"
 #include "InputVariables/config.hpp"
@@ -31,6 +32,12 @@ public:
         p.peierls = cfg.peierls();
         p.decay = cfg.decay();
         p.gradient_space = (cfg.gradient_space() == "R" ? Space::R : Space::k);
+        /* with the Peierls phase the propagation corresponds to the gradient in R, while the velocity
+           would use the finite differences in k: the current would not be the one of the dynamics */
+        if( p.peierls && p.gradient_space == Space::k ) {
+            throw std::runtime_error("gradient_space = \"k\" is not consistent with peierls = true (the default): "
+                                     "set \"peierls\": false to use the gradient in k, or \"gradient_space\": \"R\"\n");
+        }
         return p;
     }
 };

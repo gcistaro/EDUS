@@ -34,5 +34,6 @@
             "t0_units": "femtoseconds"
         }
     ],
-    "gradient_space": "k"
+    "gradient_space": "k",
+    "peierls": false
 }
