@@ -5,8 +5,6 @@
 #include <complex>
 #include <memory>
 #include <cassert>
-#define MKL_Complex16 std::complex<double>
-#include "mkl.h"
 #include <iostream>
 #include <iomanip>
 #include <type_traits>
@@ -68,13 +66,16 @@ class Vector{
 
         double norm() const;
 
-        const T* data() const {return Values.data();};
-        T* data() {return const_cast<T*>((static_cast<const Vector<T>&>(*this)).Values.data());};
+        const T* data(const Processor& proc__=host) const {return Values.data(proc__);};
+        T* data(const Processor& proc__=host) 
+            {return const_cast<T*>((const_cast<const Vector<T>&>(*this)).Values.data(proc__));};
 
         auto begin() const { return Values.begin(); }
         auto end() const {return Values.end(); } 	
         int get_NumberOfElements() const;
         
+        void initialize_device() {Values.initialize_device();}
+        void transfer_to(const Processor& proc__) {Values.transfer_to(proc__);}
 
         friend class Matrix<T>;
 };

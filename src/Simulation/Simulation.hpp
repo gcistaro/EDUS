@@ -14,6 +14,7 @@
 
 void print_bandstructure(const std::vector<std::vector<double>>& bare_kpath, Operator<std::complex<double>> Hamiltonian);
 
+
 /// @brief This class contains all the variables that are used in the simulations
 class Simulation
 {
@@ -55,7 +56,16 @@ class Simulation
         Space SpaceOfPropagation_ = k;
         /// Space where we calculate the gradient in k 
         Space SpaceOfPropagation_Gradient_ = R;
-
+        /// Processor where to run the heavy parts of the simulation
+#ifdef EDUS_GPU
+        Processor processor_ = device;
+#else 
+        Processor processor_ = host;
+#endif 
+        /// Mainly used for gpu, to have the Rgrid in contigous array
+        mdarray<double,2> bare_MasterRgridGammaCentered;
+        /// Phase acquired in the peierls transformation, to be calculated at each time step.
+        mdarray<std::complex<double>,1> Peierls_phase;
         /// Output text file to print the time values where we get the other text files printed
         std::ofstream os_Time_;
         /// Output text file to print the laser in time, electric field      
@@ -76,21 +86,24 @@ class Simulation
         void Calculate_TDHamiltonian(const double& time__, const bool& erase_H__);
         void Calculate_Velocity();
         void Propagate();
-        void Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign);
+        void Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign, const Processor& proc__=host);
         void do_onestep();
         void print_recap();
         bool PrintObservables(const double& time__, const bool& use_sparse = true);
         void Print_Population(const BandGauge& bandgauge__);
         void Print_Velocity(Operator<std::complex<double>>& aux_DM);
+        void PrintWannier();
         int get_it(const double& time__) const;
         int get_it_sparse(const double& time__) const;
         double jacobian(const Matrix<double>& A__) const;
         void OpenGap();
+        void pdos();
+        void Print_DeltaRho(const double& it__);
 
         std::string wavelength_or_frequency(const int&);
 
         template <typename Scalar_T>
-        friend void SumWithProduct(Operator<std::complex<double>>& Output__, 
+        friend void axpby(Operator<std::complex<double>>& Output__, 
                     const Scalar_T& FirstScalar__, 
                     const Operator<std::complex<double>>& FirstAddend__, 
                     const Scalar_T& SecondScalar__, 
@@ -134,7 +147,7 @@ std::vector<std::complex<double>> TraceK(BlockMatrix<T>& O__)
     }
 #ifdef EDUS_MPI
     std::vector<std::complex<double>> TraceK_reduced(O__.get_nrows(), 0.);
-    kpool_comm.reduce(&TraceK[0], &TraceK_reduced[0], TraceK.size(), MPI_SUM, 0);
+    kpool_comm->reduce(&TraceK[0], &TraceK_reduced[0], TraceK.size(), MPI_SUM, 0);
     return TraceK_reduced;
 #else
     return TraceK;
@@ -142,8 +155,42 @@ std::vector<std::complex<double>> TraceK(BlockMatrix<T>& O__)
 }
 
 
+/// Functions to get the device code working 
+#ifdef EDUS_GPU
+void Calculate_TDHamiltonian_gpu( std::complex<double>* H__, 
+                                  const std::complex<double>* H0__, 
+                                  const std::complex<double>* x__, 
+                                  const std::complex<double>* y__, 
+                                  const std::complex<double>* z__, 
+                                  double* las0__,
+                                  double* las1__,
+                                  double* las2__,
+                                  int N__
+                                );
 
 
-#include "Simulation_definitions.hpp"
+void Apply_Peierls_phase_gpu( std::complex<double>* O__, 
+                              std::complex<double>* Peierls_phase,    
+                              double* A0__, 
+                              double* A1__, 
+                              double* A2__,
+                              double* Rvectors__, 
+                              int sign, 
+                              int N,
+                              int nR
+                            );
+#endif
+
+void Calculate_TDHamiltonian_cpu( BlockMatrix<std::complex<double>>& H, 
+                                  const BlockMatrix<std::complex<double>>& H0, 
+                                  const BlockMatrix<std::complex<double>>& x, 
+                                  const BlockMatrix<std::complex<double>>& y, 
+                                  const BlockMatrix<std::complex<double>>& z, 
+                                  const Vector<double>& las);
+
+void Apply_Peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__, 
+                              mdarray<std::complex<double>,1>& Peierls_phase,
+                              const Coordinate& At,
+                              int sign);
 
 #endif

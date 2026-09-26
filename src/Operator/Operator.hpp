@@ -109,6 +109,7 @@ class Operator
         bool initialized_dft = false;
         bool initialized_fft = false;
         FourierTransform ft_;
+        Processor processor_ = host;
 
         std::string tagname = "";
 
@@ -198,7 +199,6 @@ class Operator
                 return;
             }
             initialized_fft = true;
-            
 #ifdef EDUS_MPI
             Operator_R = BlockMatrix<std::complex<double>>(R,mpindex.get_nlocal(), nbnd, nbnd, 
                                                             mpindex.get_RecommendedAllocate_fftw());
@@ -223,7 +223,6 @@ class Operator
                     throw std::runtime_error("Initialize fft from k Not yet implemented!\n");
                 }
             }
-
             Operator_k = BlockMatrix<std::complex<double>>(k,mpindex.get_nlocal(), nbnd, nbnd, 
                                                            mpindex.get_RecommendedAllocate_fftw());
             auto& kgrid = Operator_k.get_MeshGrid();
@@ -233,13 +232,14 @@ class Operator
 
             //bandindex FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex.get_RecommendedAllocate_fftw()});
             //bandindex FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex.get_RecommendedAllocate_fftw()});
-#ifdef EDUS_MPI
-            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {mpindex.get_nlocal(),nbnd*nbnd} );
-            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {mpindex.get_nlocal(),nbnd*nbnd} );
-#else
-            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_RecommendedAllocate_fftw()});
-            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_RecommendedAllocate_fftw()});
-#endif
+            auto dim_k = mpindex.get_nlocal() > 0 ? mpindex.get_nlocal() : 1;//to avoid that we get a 0 allocated pointer
+//==#ifdef EDUS_MPI
+            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {dim_k,nbnd*nbnd} );
+            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {dim_k,nbnd*nbnd} );
+//==#else
+//==            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_nlocal()});
+//==            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_nlocal()});
+//==#endif
             //use convolution index for shuffle index.
             std::vector<int> Dimensions(3);
             for(int ix=0; ix<3; ix++){
@@ -406,85 +406,85 @@ class Operator
 
         void shuffle_to_fft_R()
         {
-#ifndef EDUS_MPI
-#ifdef EDUS_TIMERS
-            PROFILE("Operator::shuffle_to_fft_R");
-#endif
-            //auto ci = MeshGrid::get_ConvolutionIndex(*Operator_R.get_MeshGrid() , *FT_meshgrid_R, *MeshGrid_Null);
-
-            #pragma omp parallel for
-            for(int iR=0; iR<Operator_R.get_nblocks(); iR++){
-                //assert(ci(iR,0) != -1);
-                for(int ibnd1=0; ibnd1<Operator_R.get_nrows(); ++ibnd1){
-                    // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
-                    for(int ibnd2=0; ibnd2<Operator_R.get_ncols(); ++ibnd2){
-                    //    FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ci(iR,0)) = Operator_R(iR, ibnd1, ibnd2);
-                        FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), iR) = Operator_R(iR, ibnd1, ibnd2);
-                    }
-                }
-            }
-#endif
+//== #ifndef EDUS_MPI
+//== #ifdef EDUS_TIMERS
+//==             PROFILE("Operator::shuffle_to_fft_R");
+//== #endif
+//==             //auto ci = MeshGrid::get_ConvolutionIndex(*Operator_R.get_MeshGrid() , *FT_meshgrid_R, *MeshGrid_Null);
+//== 
+//==             #pragma omp parallel for
+//==             for(int iR=0; iR<Operator_R.get_nblocks(); iR++){
+//==                 //assert(ci(iR,0) != -1);
+//==                 for(int ibnd1=0; ibnd1<Operator_R.get_nrows(); ++ibnd1){
+//==                     // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
+//==                     for(int ibnd2=0; ibnd2<Operator_R.get_ncols(); ++ibnd2){
+//==                     //    FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ci(iR,0)) = Operator_R(iR, ibnd1, ibnd2);
+//==                         FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), iR) = Operator_R(iR, ibnd1, ibnd2);
+//==                     }
+//==                 }
+//==             }
+//== #endif
         }
 
         void shuffle_to_fft_k()
         {
-#ifndef EDUS_MPI
-#ifdef EDUS_TIMERS
-            PROFILE("Operator::shuffle_to_fft_k");
-#endif
-            #pragma omp parallel for
-            for(int ik=0; ik<Operator_k.get_nblocks(); ik++){
-                for(int ibnd1=0; ibnd1<Operator_k.get_nrows(); ++ibnd1){
-                    // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
-                    for(int ibnd2=0; ibnd2<Operator_k.get_ncols(); ++ibnd2){
-                        FTfriendly_Operator_k(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ik) = Operator_k(ik, ibnd1, ibnd2);
-                    }
-                }
-            }
-#endif
+//== #ifndef EDUS_MPI
+//== #ifdef EDUS_TIMERS
+//==             PROFILE("Operator::shuffle_to_fft_k");
+//== #endif
+//==             #pragma omp parallel for
+//==             for(int ik=0; ik<Operator_k.get_nblocks(); ik++){
+//==                 for(int ibnd1=0; ibnd1<Operator_k.get_nrows(); ++ibnd1){
+//==                     // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
+//==                     for(int ibnd2=0; ibnd2<Operator_k.get_ncols(); ++ibnd2){
+//==                         FTfriendly_Operator_k(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ik) = Operator_k(ik, ibnd1, ibnd2);
+//==                     }
+//==                 }
+//==             }
+//== #endif
         }
 
         void shuffle_from_fft_R()
         {
-#ifndef EDUS_MPI
-#ifdef EDUS_TIMERS
-            PROFILE("Operator::shuffle_from_fft_R");
-#endif
-            //auto ci = MeshGrid::get_ConvolutionIndex(*Operator_R.get_MeshGrid(), *FT_meshgrid_R, *MeshGrid_Null);
-            // bandindex auto ciminus = MeshGrid::get_ConvolutionIndex(*MeshGrid_Null, *Operator_R.get_MeshGrid(), *Operator_R.get_MeshGrid());
-
-            #pragma omp parallel for 
-            for(int iR=0; iR<Operator_R.get_nblocks(); iR++){
-                //assert(ci(iR,0) != -1);
-                for(int ibnd1=0; ibnd1<Operator_R.get_nrows(); ++ibnd1){
-                    // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
-                    for(int ibnd2=0; ibnd2<Operator_R.get_ncols(); ++ibnd2){
-                        //Operator_R(iR, ibnd1, ibnd2) = FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ci(iR,0));
-                        Operator_R(iR, ibnd1, ibnd2) = FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), iR);
-                    }
-                }
-            }
-#endif
+//== #ifndef EDUS_MPI
+//== #ifdef EDUS_TIMERS
+//==             PROFILE("Operator::shuffle_from_fft_R");
+//== #endif
+//==             //auto ci = MeshGrid::get_ConvolutionIndex(*Operator_R.get_MeshGrid(), *FT_meshgrid_R, *MeshGrid_Null);
+//==             // bandindex auto ciminus = MeshGrid::get_ConvolutionIndex(*MeshGrid_Null, *Operator_R.get_MeshGrid(), *Operator_R.get_MeshGrid());
+//== 
+//==             #pragma omp parallel for 
+//==             for(int iR=0; iR<Operator_R.get_nblocks(); iR++){
+//==                 //assert(ci(iR,0) != -1);
+//==                 for(int ibnd1=0; ibnd1<Operator_R.get_nrows(); ++ibnd1){
+//==                     // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_R.get_ncols(); ++ibnd2){
+//==                     for(int ibnd2=0; ibnd2<Operator_R.get_ncols(); ++ibnd2){
+//==                         //Operator_R(iR, ibnd1, ibnd2) = FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ci(iR,0));
+//==                         Operator_R(iR, ibnd1, ibnd2) = FTfriendly_Operator_R(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), iR);
+//==                     }
+//==                 }
+//==             }
+//== #endif
         }
 
         void shuffle_from_fft_k()
         {
-#ifndef EDUS_MPI
-#ifdef EDUS_TIMERS
-            PROFILE("Operator::shuffle_from_fft_k");
-#endif
-            #pragma omp parallel for 
-            for(int ik=0; ik<Operator_k.get_nblocks(); ik++){
-                for(int ibnd1=0; ibnd1<Operator_k.get_nrows(); ++ibnd1){
-                    // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_k.get_ncols(); ++ibnd2){
-                    for(int ibnd2=0; ibnd2<Operator_k.get_ncols(); ++ibnd2){
-                        Operator_k(ik, ibnd1, ibnd2) = 
-                            FTfriendly_Operator_k(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ik);
-                        //Operator_k(ik, ibnd2, ibnd1) = conj(Operator_k(ik, ibnd1, ibnd2));
-                    }
-                }
-            }
-#endif            
+//== #ifndef EDUS_MPI
+//== #ifdef EDUS_TIMERS
+//==             PROFILE("Operator::shuffle_from_fft_k");
+//== #endif
+//==             #pragma omp parallel for 
+//==             for(int ik=0; ik<Operator_k.get_nblocks(); ik++){
+//==                 for(int ibnd1=0; ibnd1<Operator_k.get_nrows(); ++ibnd1){
+//==                     // bandindex for(int ibnd2=ibnd1; ibnd2<Operator_k.get_ncols(); ++ibnd2){
+//==                     for(int ibnd2=0; ibnd2<Operator_k.get_ncols(); ++ibnd2){
+//==                         Operator_k(ik, ibnd1, ibnd2) = 
+//==                             FTfriendly_Operator_k(static_cast<int>(bandindex.oneDindex(ibnd1, ibnd2)), ik);
+//==                         //Operator_k(ik, ibnd2, ibnd1) = conj(Operator_k(ik, ibnd1, ibnd2));
+//==                     }
+//==                 }
+//==             }
+//== #endif            
         }
 
         void go_to(const Space& space__) 
@@ -578,7 +578,7 @@ class Operator
                 return;
             }
             shuffle_to_fft_k();
-            ft_.fft(-1);       
+            ft_.fft(-1, processor_);       
             shuffle_from_fft_R();  
 
             space = R;
@@ -599,7 +599,7 @@ class Operator
                 return;
             }
             shuffle_to_fft_R();
-            ft_.fft(+1);          
+            ft_.fft(+1, processor_);          
             shuffle_from_fft_k();  
 
             space = k;
@@ -633,8 +633,85 @@ class Operator
             SpaceOfPropagation = Allocated_Op.SpaceOfPropagation;            
         }
 
+        bool is_hermitian()
+        {
+            bool is_hermitian = true; 
+            //#pragma omp parallel for
+            for( int ik=0; ik<Operator_k.get_nblocks(); ik++ ) {
+                for(int irow=0; irow < Operator_k.get_nrows(); irow++) {
+                    for (int icol=irow; icol< Operator_k.get_ncols(); icol++) {
+                        //std::cout << ik << " " << irow << " " << icol << " " << std::abs( Operator_k( ik, irow, icol ) - std::conj( Operator_k( ik, icol, irow ) ) ) << std::endl;
+                        if( std::abs( Operator_k( ik, irow, icol ) - std::conj( Operator_k( ik, icol, irow ) ) ) > 1.e-13 ) {
+                            std::stringstream ss; 
+                            ss << "Error while checking hermiticity of operator with tagname " << tagname << "\n."; 
+                            ss << "ik = " << ik << " irow = " << irow << " icol = " << icol << " have Operator_k( ik, irow, icol ) = ";
+                            ss << std::setw(25) << std::setprecision(15) << Operator_k( ik, irow, icol ).real();
+                            ss << std::setw(25) << std::setprecision(15) << Operator_k( ik, irow, icol ).imag();
+                            ss << " but std::conj( Operator_k( ik, icol, irow ) ) = ";
+                            ss << std::setw(25) << std::setprecision(15) << std::conj( Operator_k( ik, icol, irow ) ).real();
+                            ss << std::setw(25) << std::setprecision(15) << std::conj( Operator_k( ik, icol, irow ) ).imag();
+                            ss << std::endl;
+                            throw std::runtime_error(ss.str());
+                            is_hermitian = false;
+                        }
+                    }
+                }
+            }
+            return is_hermitian;
+        }
+
+        void initialize_device()
+        {
+            Operator_k.initialize_device();
+            Operator_R.initialize_device();
+            FTfriendly_Operator_k.initialize_device(Operator_k.data(device));
+            FTfriendly_Operator_R.initialize_device(Operator_R.data(device));
+        }
+
+        void transfer_to(const Processor& proc__)
+        {
+            processor_ = proc__;
+            Operator_k.transfer_to(proc__);
+            Operator_R.transfer_to(proc__);
+        }
+
+        void set_processor(const Processor& proc__) 
+        {
+            processor_ = proc__; 
+            Operator_k.set_processor(proc__); 
+            Operator_R.set_processor(proc__);
+            FTfriendly_Operator_k.set_processor(proc__);
+            FTfriendly_Operator_R.set_processor(proc__);            
+        }
+
+        template<typename T_>
+        void fill(const T_& value) 
+        {
+            Operator_k.fill(value);
+            Operator_R.fill(value);
+        }
 };
 
+        template <typename Scalar_T>
+void axpby(Operator<std::complex<double>>& Output_, 
+                    const Scalar_T& FirstScalar_, 
+                    const Operator<std::complex<double>>& FirstAddend_, 
+                    const Scalar_T& SecondScalar_, 
+                    const Operator<std::complex<double>>& SecondAddend_,
+                    const Processor& proc__=host)
+
+{
+#ifdef EDUS_TIMERS
+    PROFILE("axpby");
+#endif
+    auto& SpaceOfPropagation = Operator<std::complex<double>>::SpaceOfPropagation;
+
+    auto& Output       = Output_      .get_Operator( SpaceOfPropagation );
+    auto& FirstAddend  = FirstAddend_ .get_Operator( SpaceOfPropagation );
+    auto& SecondAddend = SecondAddend_.get_Operator( SpaceOfPropagation );
+
+    axpby(Output, FirstScalar_, FirstAddend, SecondScalar_, SecondAddend, proc__);
+}
 
 
 

@@ -114,8 +114,16 @@ void BlockMatrix<T>::fill(const T& Scalar)
 #ifdef EDUS_TIMERS
     PROFILE("BlockMatrix::fill");
 #endif
-    std::fill(this->Values.begin(), this->Values.end(), Scalar);
+    Values.fill(Scalar);
+// ==     std::fill(this->Values.begin(), this->Values.end(), Scalar);
 }
+
+template<class T>
+void copy(const BlockMatrix<T>& ToCopy__, BlockMatrix<T>& ToBeCopied__, const Processor& proc__)
+{
+    copy(ToCopy__.Values, ToBeCopied__.Values, proc__);
+}
+
 
 template<typename T>
 Matrix<T>& BlockMatrix<T>::operator[](const int& iblock)
@@ -147,15 +155,45 @@ const Matrix<T>& BlockMatrix<T>::operator[](const Coordinate& Point) const
 
 
 template<typename T>
-void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2 )
+void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, const Processor& proc__ )
 {
-    multiply(Output, Scalar, Input1, Input2, T(0.));
+    multiply(Output, Scalar, Input1, Input2, T(0.), proc__);
 }
 
 template<typename T>
-void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, T Scalar2 )
+void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, T Scalar2, const Processor& proc__ )
 {
     assert(Output.get_nblocks() == Input1.get_nblocks() && Input1.get_nblocks() == Input2.get_nblocks());
+#ifdef EDUS_GPU
+    if(proc__ == device) {
+        const_cast<BlockMatrix<std::complex<double>>&>(Input1).transfer_to(device);
+        const_cast<BlockMatrix<std::complex<double>>&>(Input2).transfer_to(device);
+        static auto stride = Output.get_nblocks();
+        static auto m = Output.get_nrows();
+        static auto n = Output.get_ncols();
+        static auto k = Input1.get_ncols();
+         cublasZgemmStridedBatched(
+             cublas_handle,
+             CUBLAS_OP_N, CUBLAS_OP_N, 
+             n, m, k,
+             reinterpret_cast<const cuDoubleComplex*>(&Scalar),             
+             reinterpret_cast<const cuDoubleComplex*>(Input2.data(device)),
+             n,                 
+             k * n,             
+             reinterpret_cast<const cuDoubleComplex*>(Input1.data(device)),
+             k,                    
+             m * k,                
+             reinterpret_cast<const cuDoubleComplex*>(&Scalar2),
+             reinterpret_cast<cuDoubleComplex*>(Output.data(device)),
+             n,                    
+             m * n,                
+             stride);
+        Output.transfer_to(host);
+///== debug        std::cout <<"multiply max GPU: "<< *max(Output) << std::endl;
+        Output.set_processor(device);
+        return;
+    }
+#endif
 #ifdef EDUS_BATCHGEMM
     static auto stride = Output.get_nblocks();
     static auto m = Output.get_nrows();
@@ -172,6 +210,7 @@ void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, co
     for(int iblock=0; iblock<Output.get_nblocks(); iblock++){
         Matrix_gemm(Output[iblock], Scalar, Input1[iblock], Input2[iblock], Scalar2);
     }
+///== debug    std::cout <<"multiply max: "<< *max(Output) << std::endl;
 #endif
 }
 
@@ -201,7 +240,7 @@ void convolution(BlockMatrix<T>& Output, U Scalar, const BlockMatrix<T>& Input1,
 }
 
 template<typename T_, typename U>
-void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1, const BlockMatrix<T_>& Input2, const bool& Erase_Output = true)
+void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1, const BlockMatrix<T_>& Input2, const bool& Erase_Output, const Processor& proc__)
 {
 #ifdef EDUS_TIMERS
     PROFILE("Commutator");
@@ -218,8 +257,8 @@ void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1
         }
         case(k):
         {
-            multiply(Output, Scalar, Input1, Input2, double(!Erase_Output) + im*0.);
-            multiply(Output, -Scalar, Input2, Input1, 1.+im*0.);
+            multiply(Output, Scalar, Input1, Input2, double(!Erase_Output) + im*0., proc__);
+            multiply(Output, -Scalar, Input2, Input1, 1.+im*0., proc__);
             break;
         }
     }
@@ -350,18 +389,18 @@ void BlockMatrix<T>::write_h5(const std::string& name__, const std::string& node
     HDF5_tree fout(name__, hdf5_access_t::read_write);
     fout[node__].create_node(label__);
 #ifdef EDUS_HDF5PARALLEL    
-    fout[node__][label__].create_node(kpool_comm.rank());
-    fout[node__][label__][kpool_comm.rank()].write("local", 
+    fout[node__][label__].create_node(kpool_comm->rank());
+    fout[node__][label__][kpool_comm->rank()].write("local", 
     reinterpret_cast<double*>(this->data()), (this->get_TotalSize() * 2) );
     mpi::Communicator::world().barrier();
 #else
 #ifdef EDUS_MPI
     MPI_Request req;
     static BlockMatrix<T> aux_(this->space, this->get_nblocks(), this->get_nrows(), this->get_ncols());
-    kpool_comm.isend(&((*this)(0,0,0)), 0, this->get_TotalSize(),req);
-    if( kpool_comm.rank() == 0 ) {
-        for(int ik_rank = 0; ik_rank < kpool_comm.size(); ++ik_rank) {
-            kpool_comm.receive(&(aux_(0,0,0)), ik_rank, this->get_TotalSize());
+    kpool_comm->isend(&((*this)(0,0,0)), 0, this->get_TotalSize(),req);
+    if( kpool_comm->rank() == 0 ) {
+        for(int ik_rank = 0; ik_rank < kpool_comm->size(); ++ik_rank) {
+            kpool_comm->receive(&(aux_(0,0,0)), ik_rank, this->get_TotalSize());
             fout[node__][label__].create_node(ik_rank);
             fout[node__][label__][ik_rank].write("local", 
                 reinterpret_cast<double*>(aux_.data()), (this->get_TotalSize() * 2) );
@@ -389,14 +428,14 @@ void BlockMatrix<T>::load(const std::string& name__, const int& node__, const st
     MPI_Request req;
     static BlockMatrix<T> aux_(this->space, this->get_nblocks(), this->get_nrows(), this->get_ncols());
 #ifdef EDUS_MPI
-    if( kpool_comm.rank() == 0 ) {
-        for(int ik_rank = 0; ik_rank < kpool_comm.size(); ++ik_rank) {
+    if( kpool_comm->rank() == 0 ) {
+        for(int ik_rank = 0; ik_rank < kpool_comm->size(); ++ik_rank) {
             fout[node__][label__][ik_rank].read("local", 
                 reinterpret_cast<double*>(aux_.data()), (this->get_TotalSize() * 2) );
-            kpool_comm.isend(&(aux_(0,0,0)), ik_rank, this->get_TotalSize(), req);
+            kpool_comm->isend(&(aux_(0,0,0)), ik_rank, this->get_TotalSize(), req);
         }
     }
-    kpool_comm.receive(&((*this)(0,0,0)), 0, this->get_TotalSize());
+    kpool_comm->receive(&((*this)(0,0,0)), 0, this->get_TotalSize());
     MPI_Wait(&req, MPI_STATUS_IGNORE);
 #else
     auto& aux = *this;
@@ -407,7 +446,17 @@ void BlockMatrix<T>::load(const std::string& name__, const int& node__, const st
 #endif //EDUS_HDF5
 }
 
+template<typename T>
+void BlockMatrix<T>::initialize_device()
+{
+    Values.initialize_device();
+}
 
+template<typename T>
+void BlockMatrix<T>::transfer_to(const Processor& proc__)
+{
+    Values.transfer_to(proc__);
+}
 
 template<typename T>
 auto max(const BlockMatrix<T>& m)
@@ -424,4 +473,16 @@ std::ostream& operator<<(std::ostream& os, const BlockMatrix<T>& m)
     return os;
 }
 
-
+template<class T>
+template<typename U>
+void BlockMatrix<T>::Divide(const U& Divisors__)
+{
+    #pragma omp parallel for
+    for( int iblock=0; iblock<this->get_nblocks(); iblock++ ) {
+        for( int irow = 0; irow < this->get_nrows(); irow++ ) {
+            for( int icol = 0; icol < this->get_ncols(); icol++ ) {
+                (*this)(iblock,irow,icol) /= Divisors__[iblock];
+            }
+        }
+    }
+}

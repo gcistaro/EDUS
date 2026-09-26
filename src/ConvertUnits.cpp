@@ -11,6 +11,7 @@ Unit NanoMeters(LENGTH, 1.e-09);
 Unit ElectronVolt(ENERGY,ElectronVolt_value);
 Unit Joule(ENERGY,1.);
 Unit Wcm2(INTENSITY, 1.e+04);
+Unit Rydberg(ENERGY,Rydberg_value);
 Unit FemtoSeconds(TIME, 1.e-15);
 
 Unit AuIntensity(INTENSITY, AtomicUnitOfIntensity);
@@ -33,5 +34,6 @@ Unit unit( const std::string& to_unit)
     if( to_unit == "autime"      )    {return AuTime;  }
     if( to_unit == "aulength"    )    {return AuLength;  }
     if( to_unit == "auenergy"    )    {return AuEnergy;  }
+    if( to_unit == "Rydberg"     )    {return Rydberg;     }
     return NullUnit;
 }

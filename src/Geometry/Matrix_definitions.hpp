@@ -267,3 +267,14 @@ auto max(const Matrix<T>& m)
     return *std::max_element(m.begin(), m.end(), [&](const T& a1, const T& a2){ return std::abs(a1) < std::abs(a2);});
 }
 
+template<typename T, typename U> 
+Matrix<T> diag(const U& diag_entries__)
+{
+    int n = diag_entries__.get_Size()[0];
+    Matrix<T> D(n, n);
+    D.fill(0.);
+    for( int i=0; i<n; i++ ) {
+        D(i,i) = diag_entries__(i);
+    }
+    return D;
+}

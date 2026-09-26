@@ -8,16 +8,25 @@ void print_header()
    
     // convert now to string form
     char* dt = ctime(&now);
-    
+
     output::stars();
-    output::print(std::string(21, ' '), "        ________   ________     ___    ___     ________");                   
-    output::print(std::string(21, ' '), "       |  _____|| |  __   \\\\   |  ||  |  ||   /  _____||");                
-    output::print(std::string(21, ' '), " ___   |  ||___   | ||  \\  \\\\  |  ||  |  ||   | ||____      ___");        
-    output::print(std::string(21, ' '), "|___|  |   ___||  | ||   | ||  |  ||  |  ||   \\_____  \\\\   |___|");       
-    output::print(std::string(21, ' '), "       |  ||____  | ||__/  //  |  \\\\_/   ||    _____\\  ||");                 
-    output::print(std::string(21, ' '), "       |_______|| |_______//    \\_______//    |_______//");        
-    output::print(" ");            
+    output::print(std::string(30, ' '), "       ████████╗ ███████╗   ██╗   ██╗   ██████╗        ", std::string(35, ' '));             
+    output::print(std::string(30, ' '), "       ███╔════╝ ██╔═══██╗  ██║   ██║  ██╔════╝        ", std::string(35, ' '));         
+    output::print(std::string(30, ' '), " ████╗ █████╗    ██║    ██╗ ██║   ██║  ███████╗ ████╗  ", std::string(35, ' '));                
+    output::print(std::string(30, ' '), " ╚═══╝ ███╔═╝    ██║   ██╔╝ ██║   ██║  ╚════██║ ╚═══╝  ", std::string(35, ' '));           
+    output::print(std::string(30, ' '), "       ████████╗ ███████╔╝  ╚██████╔╝  ██████╔╝        ", std::string(35, ' '));                
+    output::print(std::string(30, ' '), "       ╚═══════╝ ╚══════╝    ╚═════╝   ╚═════╝  v2.0   ", std::string(35, ' '));                
     output::stars();
+
+    // == output::stars();
+    // == output::print(std::string(21, ' '), "        ________   ________     ___    ___     ________");                   
+    // == output::print(std::string(21, ' '), "       |  _____|| |  __   \\\\   |  ||  |  ||   /  _____||");                
+    // == output::print(std::string(21, ' '), " ___   |  ||___   | ||  \\  \\\\  |  ||  |  ||   | ||____      ___");        
+    // == output::print(std::string(21, ' '), "|___|  |   ___||  | ||   | ||  |  ||  |  ||   \\_____  \\\\   |___|");       
+    // == output::print(std::string(21, ' '), "       |  ||____  | ||__/  //  |  \\\\_/   ||    _____\\  ||");                 
+    // == output::print(std::string(21, ' '), "       |_______|| |_______//    \\_______//    |_______//");        
+    // == output::print(" ");            
+    // == output::stars();
 
 
     std::stringstream start;

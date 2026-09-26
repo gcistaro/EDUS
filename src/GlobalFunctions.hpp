@@ -4,6 +4,7 @@
 #ifndef GLOBALFUNCTIONS_HPP
 #define GLOBALFUNCTIONS_HPP
 
+#include <iostream>
 #ifdef EDUS_HDF5
 #include "core/hdf5/hdf5_tree.hpp"
 #endif

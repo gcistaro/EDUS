@@ -11,35 +11,41 @@ from custom_functions.read import read_observables
 from custom_functions.fouriertransform import FourierTransform
 
 
+import argparse, sys
 
-#read data
-folder = sys.argv[1] 
+#define arguments
+parser=argparse.ArgumentParser()
 
-if len(sys.argv) > 2:
-    version = sys.argv[2]
-else:
-    version = "new"
+parser.add_argument("--folder", default="./Output/", help="Folder where the .txt files are contained")
+parser.add_argument("--version", default="new", help="Version of the EDUS code that you used")
+args=parser.parse_args()
 
-t_au, _, _, Vt_au = read_observables(folder, version)
+#print in output some infos
+print("folder       :    ", args.folder)
+print("version      :    ", args.version)
+
+
+
+t_au, _, _, _, Vt_au = read_observables(args.folder, args.version)
 
 plt.plot(t_au, Vt_au[0])
 plt.show()
-freq_eV, Vw = FourierTransform(t_au, Vt_au, True)
+freq_eV, Vw = FourierTransform(t_au, Vt_au, 0.01)
 
-#rw = Vt_au/(1j*freq_eV)
-Vw = np.linalg.norm(Vw, axis=0)
-print("Vw shape:" , Vw.shape)
+aw = 1j*freq_eV*Vw
+aw = np.linalg.norm(aw, axis=0)
+logaw = np.log10(np.abs(aw*aw))
+print("Vw shape:" , aw.shape)
 
 
-plt.plot(freq_eV, np.log10(Vw), label="$log_{10}(r(\omega))$")
+plt.plot(freq_eV/8.2656e-01, logaw, label="$log_{10}|a|^2$")
 #plt.axvline(x=7.25)
 plt.legend()
 plt.show()
-np.savetxt("absorbance.txt", np.array(np.transpose([freq_eV, Absorbance])))
-plt.savefig("Absorbance.png", dpi=200)
+np.savetxt("HHG.txt", np.array(np.transpose([freq_eV, logaw])))
 plt.close()
 
-absorbance_fig = go.Figure()
-absorbance_fig.add_trace(go.Scatter(x=freq_eV, y=Absorbance, mode='lines'))
-pio.write_html(absorbance_fig, 'absorbance.html')
+#absorbance_fig = go.Figure()
+#absorbance_fig.add_trace(go.Scatter(x=freq_eV, y=Absorbance, mode='lines'))
+#pio.write_html(absorbance_fig, 'absorbance.html')
 

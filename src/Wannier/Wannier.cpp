@@ -16,6 +16,6 @@ Wannier::Wannier(const std::string& FileName)
 /// @param FileName seedname of wannier90
 void Wannier::Print(const std::string& FileName)
 {
-    PrintWannier(FileName, NumberOfBands, NumberOfRpoints, 
+    wann::print(FileName, NumberOfBands, NumberOfRpoints, 
                 UnitCell, Degeneracy, Rmesh, H, r);
 }

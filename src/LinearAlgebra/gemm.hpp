@@ -7,7 +7,11 @@
 #endif 
 
 #include <type_traits>
-#include "mkl.h"
+#ifdef EDUS_MKL
+    #include "mkl.h"
+#else 
+    #include <cblas.h>
+#endif
 
 template<typename U, typename V>
 void gemm(int m, int n1, int k1, U alpha, const double* A, int k2, 

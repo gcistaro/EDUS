@@ -43,7 +43,7 @@ void dump_json_in_h5( const nlohmann::json& data__, const std::string& name__ )
         fout["json"].write("num_kpoints", data__["num_kpoints"].template get<int>());
         fout["json"].write("solver", data__["solver"].template get<std::string>());
 #ifdef EDUS_MPI 
-        fout["json"].write("comm_size", kpool_comm.size());
+        fout["json"].write("comm_size", kpool_comm->size());
 #endif
         for ( int ilaser = 0; ilaser < int( data__["lasers"].size() ); ++ilaser ) {
             auto lasername = "laser"+std::to_string(ilaser);

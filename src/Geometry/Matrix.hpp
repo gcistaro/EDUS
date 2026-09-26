@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <type_traits>
 
-//define mkl_complex16 to avoid incompatibilities
-
-//#include "mkl.h"
+#ifdef EDUS_MKL
+    #include "mkl.h"
+#else 
+    #include "lapacke.h"
+#endif
 #include "mdContainers/mdContainers.hpp"
 #include "LinearAlgebra/gemm.hpp"
 #include "core/profiler.hpp"
@@ -80,6 +82,8 @@ class Matrix{
         int get_nrows() const;
         int get_ncols() const;
         int get_TotalSize() const;
+        void orthogonalize();
+        bool is_hermitian() const; 
         
         friend class Vector<T>;
 };
@@ -99,6 +103,10 @@ std::ostream& operator<<(std::ostream& os, const Matrix<T>& m);
 
 template<class T>
 auto max(const Matrix<T>& M);
+
+template<typename T, typename U> 
+Matrix<T> diag(const U& diag_entries__);
+
 #include "Matrix_definitions.hpp"
 
 

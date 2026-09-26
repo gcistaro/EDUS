@@ -8,25 +8,47 @@
 #include <iomanip>
 #include <cassert>
 #include <memory>
-
+#include <complex>
 #include <iterator> // For std::forward_iterator_tag
 #include <cstddef>  // For std::ptrdiff_t
+#include <algorithm>
 
 #include "MultiIndex/MultiIndex.hpp"
+#ifdef EDUS_GPU
+#include <cuda_runtime.h>
+#endif
+
+enum Processor {host, device};
+
+template<typename T>
+class BlockMatrix;
 
 template<typename T, size_t dim> //requires ( dim>0 && dim<7 )
 class mdarray
 {
     private:
-        //std::unique_ptr<T[]> Ptr =nullptr;
+        /// container for data on CPU
         T* Ptr=nullptr;
+        /// container for data on GPU
+        T* Ptr_device=nullptr;
+        /// Dimension of mdarray on each of dim
         std::array<int, dim> Size{0};
+        /// TotalDimension as multiplication of Size 
         int TotalSize=0;
+        /// Offset over each dimension to link 1D index to nD index
         std::array<int, dim> Offset{0};
+        /// multiindex to get the 1D<->nD link-
         MultiIndex<dim> multindex;
+        /// Check if array needs to be deleted when out-of-scope
         bool NotDestruct = false;
+        /// initialize TotalSize and Offset
         void TotalSizeAndOffset();
+        /// In general different, because for some libraries we need additional memory (i.e. fftw)
         int real_dims;
+        /// Keeps track of where the object lives
+        Processor processor_=host;
+        /// check if the GPU array is initialized
+        bool initialized_device=false;
     public:
         mdarray() = default;
         mdarray(const mdarray<T,dim>& ToBeCopied);
@@ -38,9 +60,13 @@ class mdarray
         mdarray(const std::array<int,dim>& Size_, const int& real_dims__=0);
         void initialize(const std::array<int,dim>& Size_, const int& real_dims__=0);
 
-        mdarray(T* Ptr_, const std::array<int,dim>& Size_);
-        void initialize(T* Ptr_, const std::array<int,dim>& Size_);
-        
+        mdarray(T* Ptr_, const std::array<int,dim>& Size_, const int& real_dims__=0);
+        void initialize(T* Ptr_, const std::array<int,dim>& Size_, const int& real_dims__=0);
+        void initialize_device(T* Ptr_device_);
+
+        void initialize_device();
+        void transfer_to ( const Processor& );
+
         void fill(const T& FillingValue);
 
         struct Iterator
@@ -78,9 +104,10 @@ class mdarray
 
         Iterator begin() const{ return Iterator(Ptr); }
         Iterator end() const{ return Iterator(Ptr+TotalSize); } // TotalSize is out of bounds        
-        const auto& data() const {return Ptr;};
-        auto& data() {return Ptr;};
-        
+        size_t size() const { return TotalSize; }
+        const T* data(const Processor& proc__=host) const {return (proc__ == host ? Ptr : Ptr_device);};
+        T* data(const Processor& proc__=host) {return (proc__ == host ? Ptr : Ptr_device);};
+                
         template <typename... Args>
         inline int oneDindex(Args... args) const;
         
@@ -96,13 +123,19 @@ class mdarray
         inline T& operator[](const int& oneDindex);        
 
 
-        inline const int get_Size(const int& index) const;
+        inline int get_Size(const int& index) const;
         inline auto get_Size() const {return Size;};
         inline auto get_TotalSize() const {return TotalSize;};
+        inline bool on(const Processor& proc__) const {return ( proc__ == processor_ ? true : false );};
+        inline void set_processor(const Processor& proc__) { processor_ = proc__;}
         ~mdarray();
 
         template<typename T_, size_t dim_>
         friend std::ostream& operator<<(std::ostream&, const mdarray<T_,dim_>& mdarray_); 
+        template<typename T_, size_t dim_>
+        friend void copy(const mdarray<T_,dim_>& ToCopy, mdarray<T_,dim_>& ToBeCopied, const Processor& proc__);
+
+        friend class BlockMatrix<T>; 
 };
 
 #include "mdContainers_definitions.hpp"

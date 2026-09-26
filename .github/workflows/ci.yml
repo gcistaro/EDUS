@@ -1,0 +1,86 @@
+name: EDUS CI (dependency discovery)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Get code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Show environment (VERY IMPORTANT for debugging)
+      - name: Inspect system
+        run: |
+          echo "=== COMPILER ==="
+          g++ --version || true
+          echo "=== CMAKE ==="
+          cmake --version || true
+          echo "=== PYTHON ==="
+          python3 --version || true
+
+      # 3. Install all needed packages
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+                      build-essential \
+                      cmake \
+                      libopenmpi-dev \
+                      openmpi-bin \
+                      libhdf5-dev \
+                      libfftw3-dev \
+                      libfftw3-mpi-dev \
+                      libopenblas-dev \
+                      liblapack-dev \
+                      liblapacke-dev            
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy==1.26.4
+          python -m pip install scipy
+          python -m pip install matplotlib
+          python -m pip install plotly
+          python -m pip install h5py
+      
+      # 4. Clone Spack (but DO NOT install heavy deps yet)
+      - name: Clone Spack
+        run: git clone --depth=1 https://github.com/spack/spack.git $HOME/spack
+
+      # 5. Register your local Spack repo (safe, no installs yet)
+      - name: Register Spack repo
+        run: |
+          . $HOME/spack/share/spack/setup-env.sh
+          spack repo add $GITHUB_WORKSPACE/spack || true
+          spack repo list
+
+      # Configure project 
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -DEDUS_PROFILE=ON -DEDUS_MKL=OFF -DEDUS_MPI=ON 
+
+      # Build (will likely fail if dependencies missing)
+      - name: Build project
+        run: |
+          cmake --build build -j$(nproc) 
+
+      - name: Run hBN_IPA test
+        run: |
+          cd build
+          ctest -R "^hBN_IPA$" --output-on-failure
+      
+      - name: Run hBN_HSEX test
+        run: |
+          cd build
+          ctest -R "^hBN_HSEX$" --output-on-failure

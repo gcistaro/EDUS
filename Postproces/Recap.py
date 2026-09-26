@@ -28,8 +28,7 @@ ax = gs.subplots(sharex="col")
 fig.suptitle('Plots of output variables')
 
 for ip,p in enumerate(Pt):
-    if ip==0:
-        ax[0][0].plot(t_fs, p, label=str(ip))
+    ax[0][0].plot(t_fs, p, label=str(ip))
 ax[0][0].legend()
 ax[0][0].set_ylabel("Population")
 

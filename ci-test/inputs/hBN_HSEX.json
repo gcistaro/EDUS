@@ -1,32 +1,31 @@
 {
-    "tb_file": "@PROJECT_SOURCE_DIR@/tb_models/hBN_gap7.25eV_a2.5A",
-    "fermienergy": 0, 
-    "fermienergy_units" : "electronvolt",
-    "coulomb": true,
-    "epsilon": 2.0,
-    "r0": 10,
-    "grid": [40,40,1],
+    "tb_file": "../../tb_models/hBN_gap7.25eV_a2.5A",
+    "grid": [20,20,1],
     "filledbands" : 1,
+    
+    "coulomb": true,
+    "epsilon": 1.0,
+    "r0": [10],
+
     "dt": 0.01, 
     "dt_units" : "femtoseconds",
-    "printresolution": 1,
-    "printresolution_pulse": 1,
+    
     "initialtime" : 0,
     "initialtime_units" : "femtoseconds",
-    "finaltime": 1, 
+    "finaltime": 20, 
     "finaltime_units" : "femtoseconds",
 
-    "solver": "RK",
-    "order": 4,
+    "solver": "AB",
+    "order": 5,
 
     "lasers":
     [
       {
-      "intensity": 1e10,
+      "intensity": 1e08,
       "intensity_units" : "wcm2",
       "frequency": 10,
       "frequency_units" : "electronvolt",
-      "polarization": [1,1,0],
+      "polarization": [0,1,0],
       "cycles" : 1,
       "t0" : 0.0,
       "t0_units" : "fs"

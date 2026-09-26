@@ -4,7 +4,7 @@
     "fermienergy_units" : "electronvolt",
     "coulomb": true,
     "epsilon": 1.0,
-    "r0": 35,
+    "r0": [35],
     "grid": [40,40,1],
     "filledbands" : 26,
     "dt": 0.01, 

@@ -6,18 +6,7 @@
 #include <functional>
 #include <memory>
 #include "Operator/Operator.hpp"
-
-template <typename T, typename Scalar_T>
-void SumWithProduct(T& Output, const Scalar_T& FirstScalar, const T& FirstAddend, const Scalar_T& SecondScalar, const T& SecondAddend)
-{
-    assert(Output.end() - Output.begin() == FirstAddend.end() - FirstAddend.begin());
-    assert(FirstAddend.end() - FirstAddend.begin() == SecondAddend.end() - SecondAddend.begin());
-  
-    #pragma omp parallel for
-    for( int i=0; i<Output.end()-Output.begin(); ++i) {
-        *(Output.begin()+i) = FirstScalar*(*(FirstAddend.begin()+i)) + SecondScalar*(*(SecondAddend.begin()+i));
-    }
-}
+#include "LinearAlgebra/axpby.hpp"
 
 /// @brief This class is a driver for the numerical solution of the differential equation. 
 /// Right now we can use Adams-Bashforth (4 and 5) and Runge-Kutta (4) but to add something
@@ -51,6 +40,7 @@ class DESolver{
         SolverType type;
         /// Order of the method used
         int order;
+        Processor processor_ = host;
 
         void Propagate_RK();
         void Propagate_AB();
@@ -71,6 +61,7 @@ class DESolver{
         const double& get_CurrentTime() const {return CurrentTime;};
         const double& get_ResolutionTime() const {return ResolutionTime;};
         void set_InitialTime(const double& InitialTime_){InitialTime = InitialTime_;}
+        void set_processor(const Processor& proc__){processor_ = proc__; if(processor_ == device) initialize_device();}
         void set_ResolutionTime(const double& ResolutionTime_){ResolutionTime = ResolutionTime_;}
         void initialize(T& Function_, const std::function<void(T&)>& EvaluateInitialCondition_, const std::function<void(T&, const double&, const T&)>& EvaluateSourceFunction_, SolverType type__, int order);
         void Propagate();
@@ -79,6 +70,7 @@ class DESolver{
         void set_type(SolverType t){type = t;}
         void initialize_beta();
         SolverType get_type(){return type;}	
+        void initialize_device();
 };
 
 /// @brief Initialize all the class variables
@@ -167,22 +159,22 @@ void DESolver<T>::Propagate_RK()
     EvaluateSourceFunction(k, CurrentTime, *Function);
 
     /* k2=f(tn+h/2,yn+h/2*k1) */
-    SumWithProduct(AuxiliaryFunction, 1., *Function, ResolutionTime/2., k);     
-    SumWithProduct(ReducingFunction, 1., *Function, ResolutionTime/6., k);     
+    axpby(AuxiliaryFunction, 1., *Function, ResolutionTime/2., k, processor_);     
+    axpby(ReducingFunction, 1., *Function, ResolutionTime/6., k, processor_);     
     EvaluateSourceFunction(k, CurrentTime+ResolutionTime/2., AuxiliaryFunction);
 
     /* k3=f(tn+h/2, yn+h/2*k2) */
-    SumWithProduct(AuxiliaryFunction, 1., *Function, ResolutionTime/2., k);
-    SumWithProduct(ReducingFunction, 1., ReducingFunction, ResolutionTime/3., k);   
+    axpby(AuxiliaryFunction, 1., *Function, ResolutionTime/2., k, processor_);
+    axpby(ReducingFunction, 1., ReducingFunction, ResolutionTime/3., k, processor_);   
     EvaluateSourceFunction(k,CurrentTime+ResolutionTime/2., AuxiliaryFunction); 
 
     /* k4=f(tn+h,yn+h*k3) */
-    SumWithProduct(AuxiliaryFunction, 1., *Function, ResolutionTime, k);
-    SumWithProduct(ReducingFunction, 1., ReducingFunction, ResolutionTime/3., k);  
+    axpby(AuxiliaryFunction, 1., *Function, ResolutionTime, k, processor_);
+    axpby(ReducingFunction, 1., ReducingFunction, ResolutionTime/3., k, processor_);  
     EvaluateSourceFunction(k, CurrentTime+ResolutionTime, AuxiliaryFunction); 
 
     /* Compute final function */
-    SumWithProduct(*Function, 1., ReducingFunction, ResolutionTime/6., k);  
+    axpby(*Function, 1., ReducingFunction, ResolutionTime/6., k, processor_);  
     CurrentTime += ResolutionTime;
 }
 
@@ -206,7 +198,7 @@ void DESolver<T>::Propagate_AB()
 
     for( int i = 0; i < order; ++i ) {
         // y_n = y_{n-i} + h*b_i*f(t_{n-i}, y_{n-i})
-        SumWithProduct(*Function, 1., *Function, ResolutionTime*beta[i], aux_Function[index[i]]);
+        axpby(*Function, 1., *Function, ResolutionTime*beta[i], aux_Function[index[i]], processor_);
     }
 
     //slice indices one step to the right
@@ -256,7 +248,15 @@ T& DESolver<T>::get_Function()
     return *Function;
 }
 
-
+template<typename T>
+void DESolver<T>::initialize_device()
+{
+    for( auto& ix : {0,1,2,3,4} ) {
+        aux_Function[ix].initialize_device();    
+        aux_Function[ix].set_processor(device);  
+        aux_Function[ix].fill(0.);
+    }
+}
 
 template<>
 void DESolver<Operator<std::complex<double>>>::initialize(Operator<std::complex<double>>& Function_, 

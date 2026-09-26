@@ -15,7 +15,7 @@ InitialCondition =
     DM__.get_Operator_k().fill(0.);
     
     //filling matrix in Bloch-k gauge
-    for(int ik=0; ik<Uk.get_nblocks(); ++ik){
+    for(int ik=0; ik<DM__.get_Operator(Space::k).get_nblocks(); ++ik){
         for(int iband=0; iband<ctx_->cfg().filledbands(); iband++){
         //for(int iband=0; iband<Uk.get_nrows(); iband++){
         //    if(this->Band_energies[ik](iband) < FermiEnergy-threshold){

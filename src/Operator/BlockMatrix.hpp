@@ -4,8 +4,6 @@
 #include <complex>
 #include <memory>
 #include <cassert>
-#define MKL_Complex16 std::complex<double>
-#include "mkl.h"
 #include <iostream>
 #include <iomanip>
 #include <typeinfo>
@@ -76,8 +74,9 @@ class BlockMatrix{
 
         BlockMatrix<T> operator*(const BlockMatrix<T>& B);
 
-        const T* data() const {return Values.data();};
-        T* data() {return const_cast<T*>((const_cast<const BlockMatrix<T>&>(*this)).Values.data());};
+        const T* data(const Processor& proc__=host) const {return Values.data(proc__);};
+        T* data(const Processor& proc__=host) 
+            {return const_cast<T*>((const_cast<const BlockMatrix<T>&>(*this)).Values.data(proc__));};
         //friend void multiply(Matrix<T>& OutputMatrix, const auto& Scalar1, const Matrix<T>& Matrix1, 
         //                                              const auto& Scalar2, const Matrix<T>& Matrix2);
 
@@ -105,7 +104,8 @@ class BlockMatrix{
         friend void convolution(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1, const BlockMatrix<T_>& Input2 );
         template<typename T_, typename U>
         friend void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1, const BlockMatrix<T_>& Input2, 
-                                const bool& Erase_Output);
+                                const bool& Erase_Output, const Processor& proc__);
+
 
         void diagonalize(std::vector<mdarray<double,1>>& Eigenvalues,
                          BlockMatrix<std::complex<double>>& Eigenvectors) const;
@@ -134,9 +134,17 @@ class BlockMatrix{
                 }
             }
         }
+
+        void set_processor(const Processor& proc__) { Values.processor_ = proc__;};
+        void initialize_device();
+        void transfer_to(const Processor& );
+
+        template<typename U>
+        void Divide(const U& Divisors__);
 };
 
-
+template<class T>
+void copy(const BlockMatrix<T>& ToCopy__, BlockMatrix<T>& ToBeCopied__, const Processor& proc__);
 
 //overloading writing matrix
 template<class T>
@@ -146,7 +154,16 @@ template<typename T>
 auto max(const BlockMatrix<T>& m);
 
 template<typename T>
-void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, T Scalar2 );
+void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, const Processor& proc__=host );
+
+template<typename T>
+void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, T Scalar2, const Processor& proc__=host );
+
+
+
+template<typename T, typename U>
+void commutator(BlockMatrix<T>& Output, U Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, 
+                                const bool& Erase_Output = true, const Processor& proc__=host);
 
 #include "BlockMatrix_definitions.hpp"
 

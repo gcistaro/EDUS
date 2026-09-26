@@ -135,16 +135,13 @@ Coordinate Laser::operator()(const double& Time)
 
 Coordinate Laser::VectorPotential(const double& Time)
 {
-    static Coordinate A(0.,0.,0.); 
-    static double previous_Time = 0.;
-
     /* go from previous_Time to Time in n=2 steps */
     double deltaT = Time - previous_Time; 
     if(deltaT < 1.e-07) return A; 
     auto E1 = this->operator()(previous_Time);
     auto E2 = this->operator()(previous_Time + deltaT/2.);
     auto E3 = this->operator()(Time);
-    
+
     A -= deltaT/6.*(E1 + 4.*E2 + E3);
     previous_Time = Time; 
     return A;

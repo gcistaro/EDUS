@@ -36,16 +36,18 @@ class Material
             PROFILE("Material");
             model = wannierTB;
    
+            /* read tb file */
             Wannier wannier_(Filename);
-            //we move the resources from wannier.r and wannier.H, anyway we throw wannier right after.   
+            
+            /* initialize basis for the simulation */
             auto UC = Matrix<double>(wannier_.UnitCell).transpose();
             Convert_iterable(UC, Angstrom, AuLength);   
             Basis LatticeVectors_(UC);
             Coordinate::add_Basis(LatticeVectors_, LatticeVectors(R));
-            
             Basis ReciprocalLatticeVectors(2.*pi*UC.inverse().transpose());
             Coordinate::add_Basis(ReciprocalLatticeVectors, LatticeVectors(k));
             
+            /* copy wannier operators of tb file into EDUS objects */
             r[0].get_Operator_R().initialize(R, wannier_.r[0]);
             r[1].get_Operator_R().initialize(R, wannier_.r[1]);
             r[2].get_Operator_R().initialize(R, wannier_.r[2]);
@@ -56,6 +58,11 @@ class Material
             Convert_iterable(r[2].get_Operator_R(), Angstrom, AuLength);
             Convert_iterable(H.get_Operator_R(), ElectronVolt, AuEnergy);
 
+            r[0].get_Operator_R().Divide( wannier_.Degeneracy);
+            r[1].get_Operator_R().Divide( wannier_.Degeneracy);
+            r[2].get_Operator_R().Divide( wannier_.Degeneracy);
+            H.get_Operator_R()   .Divide( wannier_.Degeneracy);
+            /* copy wannier mesh of tb file into EDUS object */
             MeshGrid aux_mg(R, wannier_.Rmesh, LatticeVectors(R));
 
             H.get_Operator_R().set_MeshGrid(aux_mg);
@@ -63,6 +70,7 @@ class Material
             r[1].get_Operator_R().set_MeshGrid(aux_mg);
             r[2].get_Operator_R().set_MeshGrid(aux_mg);
 
+            /* initialize gauges of operators */
             r[0].lock_gauge(wannier);      r[0].lock_space(R);        
             r[1].lock_gauge(wannier);      r[1].lock_space(R);        
             r[2].lock_gauge(wannier);      r[2].lock_space(R);        

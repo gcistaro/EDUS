@@ -1,6 +1,7 @@
 #include "Simulation/Simulation.hpp"
 #include "core/mpi/Communicator.hpp"
 #include "core/projectdir.hpp"
+#include "Wannier/PrintWannier.hpp"
 #include <cstdlib>
 #include <filesystem>
 
@@ -21,9 +22,12 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         AuTime));
     ctx_->cfg().dt(Convert(ctx_->cfg().dt(), unit(ctx_->cfg().dt_units()),
         AuTime));
+    ctx_->cfg().decay(Convert(ctx_->cfg().decay(), unit(ctx_->cfg().decay_units()),
+        AuTime));
     ctx_->cfg().initialtime_units("autime");
     ctx_->cfg().finaltime_units("autime");
     ctx_->cfg().dt_units("autime");
+    ctx_->cfg().decay_units("autime");
 
     /* set r0 in a.u. */
     std::vector<double> r0_au(ctx_->cfg().r0().size());
@@ -35,6 +39,22 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     if ( ctx_->cfg().printresolution_pulse() == 0 ) {
         ctx_->cfg().printresolution_pulse(ctx_->cfg().printresolution());
     }
+    if (std::filesystem::exists(ctx_->cfg().screen_file())){
+        ctx_->cfg().method("hsex");
+        output::print("-> there is a screened Coulomb file so method is hsex");
+        ctx_->cfg().read_interaction(true);
+        output::print("-> there is a screened Coulomb file so read_interaction is true");
+    }
+    else if (std::filesystem::exists(ctx_->cfg().bare_file())){
+        ctx_->cfg().method("rpa");
+        output::print("-> there is a bare Coulomb file so method is rpa");
+        ctx_->cfg().read_interaction(true);
+        output::print("-> there is a bare Coulomb file so read_interaction is true");
+    }
+    if ( !ctx_->cfg().coulomb() ) {
+        ctx_->cfg().method("ipa");
+        output::print("-> coulomb was set to false so method is ipa");
+    } 
 
     ctx_->cfg().opengap(Convert(ctx_->cfg().opengap(), unit(ctx_->cfg().opengap_units()),
         AuEnergy));
@@ -48,10 +68,24 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     output::print("-> initializing grid and arrays");
     MeshGrid::MasterRgrid = MeshGrid(R, ctx_->cfg().grid());
     MeshGrid::MasterRgrid_GammaCentered = get_GammaCentered_grid(MeshGrid::MasterRgrid);
+
+    bare_MasterRgridGammaCentered.initialize({MeshGrid::MasterRgrid.mpindex.get_nlocal(), 3});
+    for( int iR_loc=0; iR_loc<MeshGrid::MasterRgrid.mpindex.get_nlocal(); iR_loc++ ) {
+        int iR_glob = MeshGrid::MasterRgrid.mpindex.loc1D_to_glob1D(iR_loc);
+        for (auto& ix : {0,1,2}) {
+            bare_MasterRgridGammaCentered(iR_loc,ix) = MeshGrid::MasterRgrid_GammaCentered[iR_glob].get("Cartesian")[ix];
+        }
+    }
+    Peierls_phase.initialize({MeshGrid::MasterRgrid.mpindex.get_nlocal()});
+
     coulomb_.set_DoCoulomb(ctx_->cfg().coulomb());
     coulomb_.set_epsilon(ctx_->cfg().epsilon());
-    coulomb_.set_r0(ctx_->cfg().r0());
-
+    coulomb_.set_method(ctx_->cfg().method());
+    coulomb_.set_read_interaction((*ctx_).cfg().read_interaction());
+    coulomb_.set_bare_file_path((*ctx_).cfg().bare_file());
+    coulomb_.set_screen_file_path((*ctx_).cfg().screen_file());
+    coulomb_.set_r0((*ctx_).cfg().r0());
+    coulomb_.set_coulomb_model((*ctx_).cfg().coulomb_model());
     /* getting rytova keldysh with python */
     // ==if (ctx_->cfg().coulomb()) {
     // ==    std::stringstream command;
@@ -96,12 +130,29 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         material_.r[ix].get_Operator(Space::k).make_hermitian();
     }
 
+    output::print("-> solve eigensystem");
+    SettingUp_EigenSystem();
+
+    pdos();
+    
+    if( ctx_->cfg().kpath().size() > 1 ) {
+        output::print("-> Printing band structure");
+        print_bandstructure(ctx_->cfg().kpath(), material_.H);
+    }
+
+    auto& Uk = Operator<std::complex<double>>::EigenVectors;
+
     H_.initialize_fft(DensityMatrix_);
     H0_.initialize_fft(DensityMatrix_);
     r_[0].initialize_fft(DensityMatrix_);
     r_[1].initialize_fft(DensityMatrix_);
     r_[2].initialize_fft(DensityMatrix_);
     aux_DM_.initialize_fft(DensityMatrix_);
+
+    if( ctx_->cfg().opengap() ) {
+        output::print("-> open gap");
+        OpenGap();
+    }
 
     auto& materialH0k = material_.H.get_Operator(Space::k);
     auto& materialr0k  = material_.r[0].get_Operator(Space::k);
@@ -117,6 +168,36 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     r_[1].lock_space(Space::k);         r_[1].go_to_R();
     r_[2].lock_space(Space::k);         r_[2].go_to_R();
 
+
+// ==     /*force hermiticity in R */
+// ==     output::print("Force hermiticity in R");
+// ==     for(int iR=0; iR <  H_.get_Operator_R().get_nblocks(); iR++ ) {
+// ==         auto mR = MeshGrid::MasterRgrid_GammaCentered.find(-MeshGrid::MasterRgrid_GammaCentered[iR]);
+// ==         for(int irow=0; irow <H_.get_Operator_R().get_nrows(); irow++ ) {
+// ==             for(int icol=0; icol < H_.get_Operator_R().get_ncols(); icol++ ) {
+// ==                 H0_.get_Operator_R()(iR, irow, icol) = (H0_.get_Operator_R()(iR, irow, icol) + std::conj(H0_.get_Operator_R()(mR, icol, irow)))/2.;
+// ==                 H0_.get_Operator_R()(mR, icol, irow) = std::conj(H0_.get_Operator_R()(iR, irow, icol));
+// ==                 /*if ( std::abs(H0_.get_Operator_R()(iR, irow, icol) - std::conj(H0_.get_Operator_R()(mR, icol, irow))) > 1.e-15 ) {
+// ==                     std::cout << irow << " " << icol << " " << H0_.get_Operator_R()(iR, irow, icol) << " " << H0_.get_Operator_R()(mR, icol, irow) << " ";
+// ==                     std::cout << std::abs(H0_.get_Operator_R()(iR, irow, icol) - std::conj(H0_.get_Operator_R()(mR, icol, irow))) << std::endl;
+// ==                 }*/
+// ==             }
+// ==         }
+// ==     }
+// ==     std::cout << "done" << std::endl;
+
+
+
+    if( ctx_->cfg().opengap() ) {
+        output::print("It is recommended to restart the simulation with the file wannier_tb.dat that I will print");
+        this->PrintWannier();
+    }
+
+
+output::print("-> Check hermiticity of H0...");
+    if( !H0_.is_hermitian() ) {
+        throw std::runtime_error("Operator H0 is not hermitian.\n");
+    }
     output::print("-> initializing lasers");
     for (int ilaser = 0; ilaser < int(ctx_->cfg().lasers().size()); ++ilaser) {
         auto currentdata = ctx_->cfg().lasers(ilaser);
@@ -143,25 +224,11 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         setoflaser_.push_back(laser);
     }
 
-    output::print("-> solve eigensystem");
-    SettingUp_EigenSystem();
-    if( ctx_->cfg().opengap() ) OpenGap();
-    auto& Uk = Operator<std::complex<double>>::EigenVectors;
-    if( ctx_->cfg().kpath().size() > 1 ) {
-        output::print("-> Printing band structure");
-        print_bandstructure(ctx_->cfg().kpath(), material_.H);
-    }
 
-
-    if( ctx_->cfg().kpath().size() > 1 ) {
-        output::print("-> Printing band structure");
-        print_bandstructure(ctx_->cfg().kpath(), material_.H);
-    }
-
-
-/* setting up TD equations */
-#include "Functional_InitialCondition.hpp"
-#include "Functional_SourceTerm.hpp"
+    /* setting up TD equations */
+    #include "Functional_InitialCondition.hpp"
+    #include "Functional_SourceTerm.hpp"
+    
     DEsolver_DM_.initialize(DensityMatrix_,
         InitialCondition, SourceTerm,
         solver.at(ctx_->cfg().solver()),
@@ -172,6 +239,7 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     DEsolver_DM_.set_ResolutionTime(Convert(ctx_->cfg().dt(),
         unit(ctx_->cfg().dt_units()),
         AuTime));
+    DEsolver_DM_.set_processor(processor_);
 
     kgradient_.initialize(*(DensityMatrix_.get_Operator(SpaceOfPropagation_Gradient_).get_MeshGrid()));
     coulomb_.initialize(material_.H.get_Operator_R().get_nrows(),
@@ -230,6 +298,34 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     mpi::Communicator::world().barrier();
 #endif
     //---------------------------------------------------------------------------------------
+
+    /* allocate device memory for the arrays we need on gpu */
+    if( processor_ == device ) {
+        H_                                       .initialize_device();
+        H0_                                      .initialize_device();
+        r_[0]                                    .initialize_device();
+        r_[1]                                    .initialize_device();
+        r_[2]                                    .initialize_device();
+        bare_MasterRgridGammaCentered            .initialize_device();
+        aux_DM_                                  .initialize_device();
+        Peierls_phase                            .initialize_device();
+        DensityMatrix_                           .initialize_device();
+        // == MeshGrid::MasterRgrid              .initialize_device();
+        // == MeshGrid::MasterRgrid_GammaCentered.initialize_device();
+        
+        /* send all arrays used for time evolution to gpu */
+        H_                                       .transfer_to(Processor::device);
+        H0_                                      .transfer_to(Processor::device);
+        r_[0]                                    .transfer_to(Processor::device);
+        r_[1]                                    .transfer_to(Processor::device);
+        r_[2]                                    .transfer_to(Processor::device);
+        bare_MasterRgridGammaCentered            .transfer_to(Processor::device);
+        aux_DM_                                  .transfer_to(Processor::device);
+        Peierls_phase                            .transfer_to(Processor::device);
+        DensityMatrix_                           .transfer_to(Processor::device);
+        // == MeshGrid::MasterRgrid              .transfer_to(Processor::device);
+        // == MeshGrid::MasterRgrid_GammaCentered.transfer_to(Processor::device);
+    }
 }
 
 /// @brief Defines whether or not at the current time step time__ we print the txt files and the matrices in hdf5
@@ -282,8 +378,54 @@ void Simulation::SettingUp_EigenSystem()
         }
     }
 
-    /* TODO: open the gap */
+    /* check that U^\dagger U = 1 */
+    BlockMatrix<std::complex<double>> identity;
+    identity.initialize(k, Uk.get_nblocks(), Uk.get_nrows(), Uk.get_ncols()); 
+    multiply(identity, 1.+im*0., Uk, UkDagger);
+
+    for (int ik = 0; ik < UkDagger.get_nblocks(); ++ik) {
+        for (int ir = 0; ir < UkDagger.get_nrows(); ++ir) {
+            for (int ic = 0; ic < UkDagger.get_ncols(); ++ic) {
+                if( ir != ic && std::abs(identity(ik,ir,ic) - 1.*(ir==ic) ) > 1.e-12 ) {
+                    std::stringstream ss; 
+                    ss << "ik = " << ik << " ir = " << ir << " ic = " << ic; 
+                    ss << "         U*U\\dagger = ";
+                    ss << std::setw(25) << std::setprecision(15) << identity(ik,ir,ic).real();
+                    ss << std::setw(25) << std::setprecision(15) << identity(ik,ir,ic).imag();
+                    ss << std::endl;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        }
+    }
+
+
 };
+
+
+void Calculate_TDHamiltonian_cpu( BlockMatrix<std::complex<double>>& H, 
+                                  const BlockMatrix<std::complex<double>>& H0, 
+                                  const BlockMatrix<std::complex<double>>& x, 
+                                  const BlockMatrix<std::complex<double>>& y, 
+                                  const BlockMatrix<std::complex<double>>& z, 
+                                  const Vector<double>& las)
+{
+#pragma omp parallel for schedule(static) collapse(3)
+    for (int iblock = 0; iblock < H0.get_nblocks(); ++iblock) {
+        for (int irow = 0; irow < H0.get_nrows(); ++irow) {
+            for (int icol = 0; icol < H0.get_ncols(); ++icol) {
+                // auto Hblock = ( SpaceOfPropagation == k ? iblock : ci(iblock, 0) );
+                // H_(Hblock, irow, icol) = H0_(iblock, irow, icol)
+                H(iblock, irow, icol) += H0(iblock, irow, icol)
+                    + las[0] * x(iblock, irow, icol)
+                    + las[1] * y(iblock, irow, icol)
+                    + las[2] * z(iblock, irow, icol);
+            }
+        }
+    }
+    //==std::cout << *max(H) << " " << *max(H0) << std::endl;
+}
+
 
 /// @brief Function to calculate the time dependent Hamiltonian (one-body) as a sum of H0 and the
 /// interaction with the laser:
@@ -306,47 +448,32 @@ void Simulation::Calculate_TDHamiltonian(const double& time__, const bool& erase
     auto& z = r_[2].get_Operator(SpaceOfCalculateTDHamiltonian_);
 
     auto las  = setoflaser_(time__).get("Cartesian");
-
-    // auto& ci = MeshGrid::ConvolutionIndex[{H0_.get_MeshGrid()->get_id(),
-    //                                           H_.get_MeshGrid()->get_id(),
-    //                                           Operator<std::complex<double>>::MeshGrid_Null->get_id()}];
-    //-----------------------------------------------------------------------------------
-
-    //--------------------------do initializations---------------------------------------
     if (erase_H__) {
         H.fill(0.);
     }
-
-    // if(ci.get_Size(0) == 0 && SpaceOfPropagation == R) {
-    //     MeshGrid::Calculate_ConvolutionIndex( *(H0_.get_MeshGrid()),
-    //                                               *(H_.get_MeshGrid()),
-    //                                               *(Operator<std::complex<double>>::MeshGrid_Null));
-    // }
-    //---------------------------------------------------------------------------------
-
-    //------------------------H(R) = H0(R) + E.r(R)-------------------------------------
-    // == /* H_ = H0_ + las_x \cdot x */
-    // == SumWithProduct(H, 1., H0, las[0], x);
-    // == /* H_ = H_ + las_y \cdot y */
-    // == SumWithProduct(H, 1., H, las[1], y);
-    // == /* H_ = H_ + las_z \cdot z */
-    // == SumWithProduct(H, 1., H, las[2], z);
-
-#pragma omp parallel for schedule(static) collapse(3)
-    for (int iblock = 0; iblock < H0.get_nblocks(); ++iblock) {
-        for (int irow = 0; irow < H0.get_nrows(); ++irow) {
-            for (int icol = 0; icol < H0.get_ncols(); ++icol) {
-                // auto Hblock = ( SpaceOfPropagation == k ? iblock : ci(iblock, 0) );
-                // H_(Hblock, irow, icol) = H0_(iblock, irow, icol)
-                H(iblock, irow, icol) += H0(iblock, irow, icol)
-                    + las[0] * x(iblock, irow, icol)
-                    + las[1] * y(iblock, irow, icol)
-                    + las[2] * z(iblock, irow, icol);
-            }
-        }
-    }
     H_.lock_space(SpaceOfCalculateTDHamiltonian_);
+#ifdef EDUS_GPU
+    if ( processor_ == device ) {
+        las.initialize_device();
+        las.transfer_to(device);
+        Calculate_TDHamiltonian_gpu(H.data(device), 
+                                    H0.data(device), 
+                                    x.data(device), 
+                                    y.data(device), 
+                                    z.data(device), 
+                                    las.data(device),
+                                    las.data(device)+1,
+                                    las.data(device)+2,
+                                    H.get_TotalSize()
+                                );
+        H.set_processor(Processor::device);
+        return;
+    } 
+#endif
+    Calculate_TDHamiltonian_cpu(H, H0, x, y, z, las);
 }
+
+
 
 /// @brief Driver for the full time propagation. It prints every 100 steps in the standard output a message.
 void Simulation::Propagate()
@@ -363,10 +490,48 @@ void Simulation::Propagate()
     /* do steps */
     double start_time = omp_get_wtime();
 
+    output::stars();
+    output::print("        it         percentage                   Elapsed time                    Estimated time    ");
+    
     for (int it = 0; it < iFinalTime; ++it) {
         if (it % 100 == 0) {
-            output::print("it:                 *", it, " / ", iFinalTime, 100 * double(it) / iFinalTime, " %",
-                          "               time: ", omp_get_wtime() - start_time, " sec");
+            double est_time_sec= ( omp_get_wtime() - start_time ) / ( double(it) / iFinalTime );
+            int est_time_min=-1.;
+            int est_time_h=-1.;
+            int est_time_days=-1.;
+            if ( est_time_sec > 60. ) {
+                est_time_min = est_time_sec / 60.;
+                est_time_sec = int(est_time_sec) % 60;
+            }
+            if ( est_time_min > 60. ) {
+                est_time_h = est_time_min / 60.;
+                est_time_min = est_time_min % 60;
+            }
+            if( est_time_h > 24. ) {
+                est_time_days = est_time_h / 24.;
+                est_time_h = est_time_h % 24;
+            }
+            
+            if (est_time_days > 0 ) {
+                output::print(it, 100 * double(it) / iFinalTime, " %        ",
+                              omp_get_wtime() - start_time, " sec            ", 
+                              est_time_days, " d ", est_time_h, " h");
+            }
+            else if (est_time_h > 0 ) {
+                output::print(it, 100 * double(it) / iFinalTime, " %        ",
+                              omp_get_wtime() - start_time, " sec            ", 
+                              est_time_h, " h ", est_time_min, " min");
+            }
+            else if (est_time_min > 0 ) {
+                output::print(it, 100 * double(it) / iFinalTime, " %        ",
+                              omp_get_wtime() - start_time, " sec            ", 
+                              est_time_min, " min ", int(est_time_sec), " sec");
+            }
+            else {
+                output::print(it, 100 * double(it) / iFinalTime, " %        ",
+                              omp_get_wtime() - start_time, " sec            ", 
+                              est_time_sec, " sec");
+            }
         }
         do_onestep();
     }
@@ -381,7 +546,19 @@ void Simulation::Propagate()
 void Simulation::do_onestep()
 {
     auto CurrentTime = DEsolver_DM_.get_CurrentTime();
-    //------------------------Print population-------------------------------------
+
+    if (PrintObservables(CurrentTime, false)) {
+        DensityMatrix_.transfer_to(host);
+        // print time
+        os_Time_ << CurrentTime << std::endl;
+        // print laser
+        os_Laser_ << setoflaser_(DEsolver_DM_.get_CurrentTime()).get("Cartesian");
+        os_VectorPot_ << setoflaser_.VectorPotential(DEsolver_DM_.get_CurrentTime()).get("Cartesian");
+        Print_Population(BandGauge::bloch);
+        Print_Population(BandGauge::wannier);
+        Print_Velocity(DensityMatrix_);
+        // == Print_DeltaRho(Convert(CurrentTime,AuTime,FemtoSeconds)); 
+    }
 
     if (PrintObservables(CurrentTime, true)) {
 #ifdef EDUS_HDF5
@@ -416,18 +593,7 @@ void Simulation::do_onestep()
         fout[nodename::time_au].write(node.str(), CurrentTime);
 #endif
     }
-
-    if (PrintObservables(CurrentTime, false)) {
-        // print time
-        os_Time_ << CurrentTime << std::endl;
-        // print laser
-        os_Laser_ << setoflaser_(DEsolver_DM_.get_CurrentTime()).get("Cartesian");
-        os_VectorPot_ << setoflaser_.VectorPotential(DEsolver_DM_.get_CurrentTime()).get("Cartesian");
-        Print_Population(BandGauge::bloch);
-        Print_Population(BandGauge::wannier);
-        Print_Velocity(DensityMatrix_);
-    }
-    //------------------------------------------------------------------------------
+    DensityMatrix_.set_processor(processor_);
     DEsolver_DM_.Propagate();
 }
 
@@ -438,6 +604,7 @@ void Simulation::do_onestep()
 /// where @f$ \rho_{nn}(\textbf{k}) @f$ is the density matrix in the bloch gauge.
 void Simulation::Print_Population(const BandGauge& bandgauge__)
 {
+    aux_DM_.set_processor(host);
     std::copy(DensityMatrix_.get_Operator(DensityMatrix_.space).begin(),
               DensityMatrix_.get_Operator(DensityMatrix_.space).end(),
               aux_DM_.get_Operator(DensityMatrix_.space).begin());
@@ -454,19 +621,30 @@ void Simulation::Print_Population(const BandGauge& bandgauge__)
 
     /* Print population of every orbital */
     auto& os = (bandgauge__ == wannier) ? os_Pop_wannier_ : os_Pop_; 
-
-    if( index != -1 ) {
+    
+    /* define the index of Rgrid where (0,0,0) is */
+    /* till next comment should be put in Operator.hpp */
+    auto Rgrid = DensityMatrix_.get_Operator(Space::R).get_MeshGrid();
+    int index_origin_global, index_origin_local;
+    index_origin_global = Rgrid->find(Coordinate(0,0,0));
+    bool HasOrigin = Rgrid->mpindex.is_local(index_origin_global);
+    if( HasOrigin ) {
+        index_origin_local = Rgrid->mpindex.glob1D_to_loc1D(index_origin_global);  
+    }  
+    /* this is next comment */
+    if( HasOrigin ) {
         for (int ibnd = 0; ibnd < DensityMatrix_.get_Operator_k().get_nrows(); ibnd++) {
             if( bandgauge__ == bloch && ibnd < ctx_->cfg().filledbands() ) {
-                os << std::setw(30) << std::setprecision(14) << 1. - aux_DM_.get_Operator_R()(index,ibnd,ibnd).real();
+                os << std::setw(30) << std::setprecision(14) << 1. - aux_DM_.get_Operator_R()(index_origin_local,ibnd,ibnd).real();
             }
             else {
-                os << std::setw(30) << std::setprecision(14) << aux_DM_.get_Operator_R()(index,ibnd,ibnd).real();
+                os << std::setw(30) << std::setprecision(14) << aux_DM_.get_Operator_R()(index_origin_local,ibnd,ibnd).real();
             }
             os << " ";
         }
         os << std::endl;
     }
+    aux_DM_.set_processor(processor_);
 }
 
 /// @brief Calculation of the jacobian of the real lattice vectors
@@ -523,11 +701,11 @@ double Simulation::jacobian(const Matrix<double>& A__) const
 void Simulation::Calculate_Velocity()
 {
 #ifdef __DEBUG
-    H_.print_Rdecay("H0__", material_.rwann_);
+    H0_.print_Rdecay("H0__", material_.rwann_);
     for (int ix : { 0, 1, 2 }) {
         std::stringstream name;
         name << "r0__" << ix ;
-        material_.r[ix].print_Rdecay(name.str(), material_.rwann_);
+        r_[ix].print_Rdecay(name.str(), material_.rwann_);
     }
 #endif
     std::vector<Coordinate> direction(3);
@@ -583,7 +761,7 @@ void Simulation::Calculate_Velocity()
 void Simulation::Print_Velocity(Operator<std::complex<double>>& aux_DM)
 {
     std::array<std::complex<double>, 3> v = { 0., 0., 0. };
-
+    aux_DM_.set_processor(host);
     std::copy(DensityMatrix_.get_Operator(DensityMatrix_.space).begin(),
               DensityMatrix_.get_Operator(DensityMatrix_.space).end(),
               aux_DM_.get_Operator(DensityMatrix_.space).begin());
@@ -608,7 +786,7 @@ void Simulation::Print_Velocity(Operator<std::complex<double>>& aux_DM)
         v[ix] /= DMK.get_MeshGrid()->get_TotalSize();
     }
 #ifdef EDUS_MPI
-    if (kpool_comm.rank() == 0)
+    if (kpool_comm->rank() == 0)
 #endif
     {
         os_Velocity_ << std::setw(20) << std::setprecision(8) << v[0].real();
@@ -619,6 +797,7 @@ void Simulation::Print_Velocity(Operator<std::complex<double>>& aux_DM)
         os_Velocity_ << std::setw(20) << std::setprecision(8) << v[2].imag();
         os_Velocity_ << std::endl;
     }    
+    aux_DM_.set_processor(processor_);
 }
 
 /// @brief Recap of all the variables of the simulation, as read from the input json file or
@@ -636,7 +815,13 @@ void Simulation::print_recap()
         Convert(DEsolver_DM_.get_ResolutionTime(), AuTime, FemtoSeconds), " fs");
     output::print("PrintResolution          *", ctx_->cfg().printresolution());
     output::print("PrintResolution(pulse):  *", ctx_->cfg().printresolution_pulse());
+    output::print("Decay                    *", ctx_->cfg().decay(), " a.u.",
+        Convert(ctx_->cfg().decay(), AuTime, FemtoSeconds), " fs");
     output::print("Coulomb                  *", std::string(8, ' '), (coulomb_.get_DoCoulomb() ? "True" : "False"));
+    output::print("barecoulomb              *", std::string(8, ' '), ctx_->cfg().bare_file());
+    output::print("screencoulomb            *", std::string(8, ' '), ctx_->cfg().screen_file());
+    output::print("Method                   *        ",  coulomb_.get_method());
+    output::print("Read Interaction         *        ", ( coulomb_.get_read_interaction() ? "True" : "False"));
     output::print("epsilon                  *", ctx_->cfg().epsilon());
     output::print("r0x                      *", coulomb_.get_r0()[0], " a.u.",
                                                 Convert( coulomb_.get_r0()[0], AuLength, Angstrom), " angstrom");
@@ -646,6 +831,7 @@ void Simulation::print_recap()
                                                 Convert( coulomb_.get_r0()[2], AuLength, Angstrom), " angstrom");
     output::print("r0_avg                   *", coulomb_.get_r0_avg(), " a.u.",
                                                 Convert( coulomb_.get_r0_avg(), AuLength, Angstrom), " angstrom");
+    output::print("filledbands              *", ctx_->cfg().filledbands());
     output::print("toprint-> DMk_wannier    *        ", std::string(ctx_->cfg().dict()["toprint"]["DMk_wannier"]));
     output::print("toprint-> DMk_bloch      *        ", std::string(ctx_->cfg().dict()["toprint"]["DMk_bloch"]));
     output::print("toprint-> fullH          *        ", std::string(ctx_->cfg().dict()["toprint"]["fullH"]));
@@ -768,8 +954,8 @@ void print_bandstructure(const std::vector<std::vector<double>>& bare_kpath__, O
     for( int ik = 0; ik < bare_kpath__.size(); ++ik ) {
         auto& bare_k = bare_kpath__[ik];
         path[ik] = Coordinate(bare_k[0], bare_k[1], bare_k[2], LatticeVectors(Space::k));
-    }
-
+    }    
+    
     /* create kmesh */
     MeshGrid MeshGridPath(Space::k, path, 0.01);
 
@@ -786,7 +972,14 @@ void print_bandstructure(const std::vector<std::vector<double>>& bare_kpath__, O
     for(int ik=0; ik<Eigenvalues.size(); ik++){
         for(int iband=0; iband<Eigenvalues[ik].get_Size(0); ++iband){
             Output << std::setw(6) << ik;
-            Output << std::setw(15) << std::setprecision(6) << Convert(Eigenvalues[ik](iband),AuEnergy,ElectronVolt) << std::endl;
+            Output << std::setw(15) << std::setprecision(6) << Convert(Eigenvalues[ik](iband),AuEnergy,ElectronVolt);
+            auto sum = 0.;
+            for(int iwann=0; iwann<Eigenvalues[ik].get_Size(0); ++iwann) {
+                Output << std::setw(15) << std::setprecision(6) << std::pow(std::abs(Eigenvectors[ik](iwann,iband)),2);
+                sum += std::pow(std::abs(Eigenvectors[ik](iwann,iband)),2);
+            }
+            Output << std::setw(15) << std::setprecision(6)<< sum; 
+            Output << std::endl;
         }
     }
     Output.close();
@@ -808,24 +1001,24 @@ void print_bandstructure(const std::vector<std::vector<double>>& bare_kpath__, O
     Gnuplot << "pause -1" << std::endl;
 }
 
-template<typename Func>
-double findextreme(Func func, const std::vector<mdarray<double,1>>& array, int bandindex, mpi::Communicator& comm)
-{
-    std::vector<double> local_extreme(comm.size());
-    local_extreme[kpool_comm.rank()] = findextreme(func, array, bandindex);
-    MPI_Allgather(MPI_IN_PLACE, 1, MPI_DOUBLE, &local_extreme[0], 1, MPI_DOUBLE, comm.communicator());
-    return *func(local_extreme.begin(), local_extreme.end());
-}
-
-template<typename Func>
-double findextreme(Func func, const std::vector<mdarray<double,1>>& array, int bandindex)
-{
-    std::vector<double> array_k(array.size());
-    for( int ik=0; ik<array.size(); ++ik ) {
-        array_k[ik] = array[ik](bandindex);
-    }
-    return *func(array_k.begin(), array_k.end());
-}
+// == template<typename Func>
+// == double findextreme(Func func, const std::vector<mdarray<double,1>>& array, int bandindex, mpi::Communicator& comm)
+// == {
+// ==     std::vector<double> local_extreme(comm.size());
+// ==     local_extreme[kpool_comm->rank()] = findextreme(func, array, bandindex);
+// ==     MPI_Allgather(MPI_IN_PLACE, 1, MPI_DOUBLE, &local_extreme[0], 1, MPI_DOUBLE, comm.communicator());
+// ==     return *func(local_extreme.begin(), local_extreme.end());
+// == }
+// == 
+// == template<typename Func>
+// == double findextreme(Func func, const std::vector<mdarray<double,1>>& array, int bandindex)
+// == {
+// ==     std::vector<double> array_k(array.size());
+// ==     for( int ik=0; ik<array.size(); ++ik ) {
+// ==         array_k[ik] = array[ik](bandindex);
+// ==     }
+// ==     return *func(array_k.begin(), array_k.end());
+// == }
 
 void Simulation::OpenGap()
 {
@@ -869,31 +1062,150 @@ void Simulation::OpenGap()
     material_.H.initialize_fft(DensityMatrix_);
     std::copy(Corrected_hamiltonian_k.begin(), Corrected_hamiltonian_k.end(), material_.H.get_Operator_k().begin());
     std::copy(Corrected_hamiltonian_R.begin(), Corrected_hamiltonian_R.end(), material_.H.get_Operator_R().begin());
-
 }
 
 
-void Simulation::Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign = +1)
+void Simulation::Apply_Peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign = +1, const Processor& proc__)
 {
     O__.go_to_R();
-    static mdarray<std::complex<double>,1> Peierls_phase({O__.get_Operator(Space::R).get_nblocks()});
 
     /* Calculate Peierls phase on the grid */
     auto At     = setoflaser_.VectorPotential(time__);
     auto& Rgrid = MeshGrid::MasterRgrid_GammaCentered; //WARNING! Here we are supposing O__ R grid is the MasterRgrid! A check would be ideal
+#ifdef EDUS_GPU
+    if ( proc__ == device ) {
+        auto At_cart     = At.get("Cartesian");
+        At_cart.initialize_device();
+        At_cart.transfer_to(processor_);
+//==        O__.transfer_to(device);
+        Apply_Peierls_phase_gpu(    O__.get_Operator(R).data(device), 
+                                    Peierls_phase.data(device),
+                                    At_cart.data(device),
+                                    At_cart.data(device)+1,
+                                    At_cart.data(device)+2,
+                                    bare_MasterRgridGammaCentered.data(device),
+                                    sign, 
+                                    O__.get_Operator(R).get_TotalSize(),
+                                    O__.get_Operator(R).get_nblocks()
+                                );
+        O__.set_processor(Processor::device);
+        return;
+    } 
+#endif
+    Apply_Peierls_phase_cpu(O__.get_Operator(R),
+                            Peierls_phase,
+                            At,
+                            sign);
+}
 
+
+void Apply_Peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__, 
+                              mdarray<std::complex<double>,1>& Peierls_phase,
+                              const Coordinate& At,
+                              int sign)
+{
+    auto& Rgrid = MeshGrid::MasterRgrid_GammaCentered; //WARNING! Here we are supposing O__ R grid is the MasterRgrid! A check would be ideal
 #pragma omp parallel for schedule(static)
-    for (int iR_loc = 0; iR_loc < O__.get_Operator(Space::R).get_nblocks(); ++iR_loc) {
+    for (int iR_loc = 0; iR_loc < OR__.get_nblocks(); ++iR_loc) {
         int iR_glob = Rgrid.mpindex.loc1D_to_glob1D(iR_loc);
         Peierls_phase(iR_loc) = std::exp(im*double(sign)*At.dot(Rgrid[iR_glob]));
     }
 
 #pragma omp parallel for schedule(static) collapse(3)
-    for (int iblock = 0; iblock < O__.get_Operator(Space::R).get_nblocks(); ++iblock) {
-        for (int irow = 0; irow < O__.get_Operator(Space::R).get_nrows(); ++irow) {
-            for (int icol = 0; icol < O__.get_Operator(Space::R).get_ncols(); ++icol) {
-                O__.get_Operator(Space::R)(iblock, irow, icol) *= Peierls_phase(iblock);
+    for (int iblock = 0; iblock < OR__.get_nblocks(); ++iblock) {
+        for (int irow = 0; irow < OR__.get_nrows(); ++irow) {
+            for (int icol = 0; icol < OR__.get_ncols(); ++icol) {
+                OR__(iblock, irow, icol) *= Peierls_phase(iblock);
             }
         }
     }
+}
+
+void Simulation::PrintWannier()
+{
+    auto nbnd = H_.get_Operator_R().get_nrows();
+    mdarray<double,2> A({3,3}); 
+    for(auto& ix : {0,1,2}) {
+        for(auto& jx :{0,1,2}) {
+            A(ix,jx) = Coordinate::get_Basis(LatticeVectors(R)).get_M()(jx,ix);
+            A(ix,jx) = Convert(A(ix,jx), AuLength, Angstrom);
+        }
+    }    
+    std::vector<int> Degeneracy(H_.get_Operator_R().get_MeshGrid()->get_TotalSize(),1);
+    mdarray<double,2> Rmesh_gamma({H_.get_Operator_R().get_MeshGrid()->get_TotalSize(),3});
+    for(int iR=0; iR<Rmesh_gamma.get_Size()[0]; iR++) {
+        for(auto& ix : {0,1,2} ){
+            Rmesh_gamma(iR,ix) = MeshGrid::MasterRgrid_GammaCentered[iR].get(LatticeVectors(R))[ix];
+        }
+    }
+    mdarray<std::complex<double>,3> H__;
+    H__.initialize({Rmesh_gamma.get_Size()[0], nbnd, nbnd});
+    std::array<mdarray<std::complex<double>,3>, 3> r__;
+    std::copy(H0_.get_Operator(R).begin(), H0_.get_Operator(R).end(), H__.begin());
+    Convert_iterable(H__, AuEnergy, ElectronVolt);
+    for(auto& ix : {0,1,2}) {
+        r__[ix].initialize({Rmesh_gamma.get_Size()[0], nbnd, nbnd});
+        std::copy(r_[ix].get_Operator(R).begin(), r_[ix].get_Operator(R).end(), r__[ix].begin());
+        Convert_iterable(r__[ix], AuLength, Angstrom);
+    }
+    for(int iR=0; iR<Rmesh_gamma.get_Size()[0]; iR++) {
+        for(auto& ix : {0,1,2} ){
+            Rmesh_gamma(iR,ix) = MeshGrid::MasterRgrid_GammaCentered[iR].get(LatticeVectors(R))[ix];
+        }
+    }    
+    wann::print("wannier_tb.dat", nbnd, H_.get_Operator_R().get_MeshGrid()->get_TotalSize(),
+                 A, Degeneracy, Rmesh_gamma, H__, r__);
+}
+
+void Simulation::pdos()
+{
+    auto& Uk = Operator<std::complex<double>>::EigenVectors;
+    auto nbnd = Uk.get_nrows();
+
+    /* sum over k points the projections */
+    std::vector< std::map<int, double> >  pdos(nbnd);
+    auto E_resolution = Convert(0.1, ElectronVolt, AuEnergy);
+    auto min_eig = min(Band_energies_);
+    auto max_eig = max(Band_energies_);
+    auto DeltaE = max_eig - min_eig;
+
+
+    /* since psi_{nk} = \sum_m U_{mn} \tilde{psi_{mk}} we have U_{mn} = <psi_{nk}|\tilde{psi_{mk}}>*/
+    for(int ik = 0; ik < Uk.get_nblocks(); ++ik) {
+        for( int irow = 0; irow < nbnd; ++irow ) {
+            for( int icol = 0; icol < nbnd; ++icol ) {
+                auto ibar = int( ( Band_energies_[ik](icol) - min_eig )/E_resolution );
+                pdos[irow][ibar] += std::pow( std::abs( Uk(ik, irow, icol) ), 2 );
+            }
+        }
+    }
+
+    std::ofstream os_pdos("pdos.txt");
+    for(int iE=0; iE<int((max_eig-min_eig)/E_resolution); iE++) {
+        os_pdos << min_eig + iE * E_resolution << " ";
+        for(int ialpha=0; ialpha<nbnd; ialpha++) {
+            os_pdos << pdos[ialpha][iE] << " ";
+        }
+        os_pdos << std::endl;
+    }
+    os_pdos.close();
+}
+
+
+void Simulation::Print_DeltaRho(const double& it__) 
+{
+    static Operator<std::complex<double>> deltarho(DensityMatrix_);
+
+    for(int iblock=0; iblock<DensityMatrix_.get_Operator(R).get_nblocks(); iblock++) {
+        for(int irow=0; irow<DensityMatrix_.get_Operator(R).get_nrows(); irow++) {
+            for(int icol=0; icol<DensityMatrix_.get_Operator(R).get_ncols(); icol++) {
+                deltarho.get_Operator(R)(iblock, irow, icol) = 
+                    DensityMatrix_.get_Operator_R()(iblock,irow,icol) - coulomb_.get_DM0().get_Operator(R)(iblock,irow,icol);
+            }
+        } 
+    }
+
+    std::stringstream filename; 
+    filename << "DeltaRho_" << it__ << ".txt";
+    deltarho.print_Rdecay(filename.str(), material_.rwann_);
 }

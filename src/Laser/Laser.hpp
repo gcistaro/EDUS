@@ -98,6 +98,10 @@ class Laser{
         double Amplitude = 0;
         Coordinate Polarization;//you need this only in cartesian coordinates.
 
+        Coordinate A = Coordinate(0.,0.,0.); 
+        double previous_Time = 0.;
+
+
     public:
         Laser(){};
         Coordinate operator()(const double& Time);

@@ -62,6 +62,7 @@ int ParseWannier_Matrix(const std::vector<std::vector<std::string>>::iterator Li
 
 
 int ParseWannier_Matrix(const std::vector<std::vector<std::string>>::iterator LineIterator_begin, 
+                        const std::vector<std::vector<std::string>>::iterator& LineIterator_end,
                         double* R, std::complex<double>* Matrix0, std::complex<double>* Matrix1, 
                         std::complex<double>* Matrix2, const int& NumberOfBands)
 {
@@ -71,7 +72,9 @@ int ParseWannier_Matrix(const std::vector<std::vector<std::string>>::iterator Li
     *(R+2) = std::atof((*LineIterator_aux)[2].c_str());
     
     LineIterator_aux++;
-    while((*LineIterator_aux).size() == 8){
+    while(( (LineIterator_aux != LineIterator_end) &&
+            (*(LineIterator_aux)).size() == 8)  ) {//the things in while goes to another block and '+1' skips the Rvector
+        
         int SizeOfMatrixElement = ParseWannier_MatrixElement(LineIterator_aux, Matrix0, Matrix1, Matrix2, NumberOfBands);
         LineIterator_aux+=SizeOfMatrixElement;
     }
@@ -93,13 +96,15 @@ int ParseWannier_Hamiltonian(const std::vector<std::vector<std::string>>::iterat
 }
 
 int ParseWannier_PositionOperator(const std::vector<std::vector<std::string>>::iterator& LineIterator_begin,
+                 const std::vector<std::vector<std::string>>::iterator& LineIterator_end,
                  mdarray<double,2>& Rmesh, std::array<mdarray<std::complex<double>,3>, 3>& r, 
                  const int& NumberOfBands)
 {
     auto LineIterator_aux = LineIterator_begin;
     int index = 0;
-    while((*(LineIterator_aux+1)).size() == 8){//the things in while goes to another block and '+1' skips the Rvector
-        int SizeOfMatrix = ParseWannier_Matrix(LineIterator_aux, &Rmesh(index,0), &(r[0](index,0,0)),
+    while(( (LineIterator_aux+1 < LineIterator_end) && 
+            (*(LineIterator_aux+1)).size() == 8)  ) {//the things in while goes to another block and '+1' skips the Rvector
+        int SizeOfMatrix = ParseWannier_Matrix(LineIterator_aux, LineIterator_end, &Rmesh(index,0), &(r[0](index,0,0)),
                                                &(r[1](index,0,0)), &(r[2](index,0,0)), NumberOfBands);
         LineIterator_aux += SizeOfMatrix+1;
         ++index;
@@ -148,7 +153,8 @@ void ParseWannier(const std::string& FileNameTB, int& NumberOfBands, int& Number
     LineIterator += Line_endHamiltonian;
 
 
-    auto Line_endPositionOperator = ParseWannier_PositionOperator(LineIterator, Rmesh, r, NumberOfBands);
+    auto Line_endPositionOperator = ParseWannier_PositionOperator(LineIterator, file_content.end(),
+                                                                 Rmesh, r, NumberOfBands);
     Line_endPositionOperator++;
 }
 

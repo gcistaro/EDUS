@@ -7,6 +7,20 @@
             "default": "",
             "title": "name of the file _tb.dat"
         },
+        "decay": {
+            "type": "number",
+            "default": 0.0,
+            "title": "decay rate of the density matrix"
+        },
+        "decay_units": {
+            "type": "string",
+            "default": "femtoseconds",
+            "enum": [
+                "femtoseconds",
+                "autime"
+            ],
+            "title": "Units used for the decay rate of the density matrix"
+        },
         "fermienergy": {
             "type": "number",
             "default": 0.0,
@@ -24,7 +38,13 @@
         "coulomb": {
             "type": "boolean",
             "default": false,
-            "title": "If true, we go beyond IPA using HSEX theory"
+            "title": "If true, we go beyond IPA using either RPA or HSEX."
+        },
+        "method": {
+            "type": "string",
+            "default": "hsex",
+            "enum": ["ipa", "rpa", "hsex"],
+            "title": "If ipa, non-interactiong particles are considered. If RPA, we consider only the Hartree term for the interaction. If hsex, both Hartree and screened Fock are taken into account."
         },
         "opengap": {
             "type": "number",
@@ -39,6 +59,21 @@
                 "auenergy"
             ],
             "title": "Units used for the gap we want to open"
+        },
+        "read_interaction": {
+            "type": "boolean",
+            "default": false,
+            "title": "If true, electron-electron interactions are read from barecoulomb.txt and screencoulomb.txt."
+        },
+        "bare_file": {
+            "type": "string",
+            "default": "./barecoulomb.txt",
+            "title": "Path of the bare Coulomb interaction"
+        },
+        "screen_file": {
+            "type": "string",
+            "default": "./screencoulomb.txt",
+            "title": "Path of the screened Coulomb interaction"
         },
         "epsilon": {
             "type": "number",
@@ -58,6 +93,15 @@
                 "angstrom"
             ],
             "title": "Units for the Time resolution used for propagating Density Matrix"
+        },
+        "coulomb_model": {
+            "type": "string",
+            "default": "rytova_keldysh",
+            "enum": [
+                "rytova_keldysh",
+                "vcoul3d"
+            ],
+            "title": "Coulomb model type"
         },
         "grid": {
             "type": "array",
@@ -151,7 +195,7 @@
         },
         "peierls": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "title": "If true, we propagate the EOM in the Peierls gauge"
         },
         "toprint": {
