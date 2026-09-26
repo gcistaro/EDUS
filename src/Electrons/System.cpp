@@ -108,7 +108,8 @@ namespace electron
         direction[1].initialize(0, 1, 0);
         direction[2].initialize(0, 0, 1);
 
-        auto det = jacobian(Coordinate::get_Basis(LatticeVectors(Space::R)).get_M(), grid_size);
+        cell_volume_ = jacobian(Coordinate::get_Basis(LatticeVectors(Space::R)).get_M(), grid_size);
+        auto det = cell_volume_;
 
         for (int ix : { 0, 1, 2 }) {
             Velocity_[ix].lock_space(k);

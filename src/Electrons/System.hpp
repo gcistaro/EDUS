@@ -29,6 +29,8 @@ private:
             std::array<Operator<std::complex<double>>, 3> r_;
             /// Velocity operator
             std::array<Operator<std::complex<double>>, 3> Velocity_;
+            /// Volume (3D) or area (2D) of the unit cell, a.u.: the velocity operator is divided by it
+            double cell_volume_ = 1.;
             /// Eigenvalues and eigenvectors of H0
             BandStructure bandstructure_;
             /// Wannier centers
@@ -66,6 +68,7 @@ public:
             const Operator<std::complex<double>>& H0() const {return H0_;};
             const std::array<Operator<std::complex<double>>, 3>& r() const {return r_;};
             const std::array<Operator<std::complex<double>>,3>& Velocity() const {return Velocity_;};
+            double cell_volume() const {return cell_volume_;};
             const std::vector<Coordinate>& wannier_centers() const {return wannier_centers_;};
             const Operator<std::complex<double>>& DM0() const {return DM0_;};
             int num_bands() const { return num_bands_; }

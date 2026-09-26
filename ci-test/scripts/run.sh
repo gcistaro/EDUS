@@ -85,6 +85,13 @@ for ref in "${REF_DIR}"/*; do
         || num_failures=$((num_failures+1))
 done
 
+# ─────────────────────────────────────────────
+# Energy balance: E(t) - E(0) = work of the field (no reference needed)
+# ─────────────────────────────────────────────
+if ! grep -q '"decay"' "${INPUT}"; then
+    python3 "${PROJECT_ROOT}/ci-test/check_energy.py" Output/Energy.txt || num_failures=$((num_failures+1))
+fi
+
 if [ ${num_failures} -ne 0 ]; then
     echo "${num_failures} comparison(s) failed for ${SEEDNAME}"
     exit 1
