@@ -771,8 +771,17 @@ void WannierWavefunctions::centre_and_spread(int iw__, double& norm__, std::arra
         f0[x] = double(M[x]) * std::arg(z[x]) / (2. * pi);
     }
 
-    // Pass 2: second moment of the minimum-image displacement from f0 (each direction folded modulo
-    // mp_grid), then the usual Var(r) = E[dr^2] - E[dr]^2 correction to refine the centre.
+    // Pass 2: second moment of the minimum-image displacement from f0, then the usual
+    // Var(r) = E[dr^2] - E[dr]^2 correction to refine the centre.
+    //
+    // a_ is not orthogonal in general (e.g. the FCC primitive cell of a diamond lattice), so folding
+    // each fractional component independently into (-M[x]/2, M[x]/2] does NOT always give the true
+    // (Cartesian) nearest periodic image: cross terms a_i.a_j can make a neighbouring image closer in
+    // real space even though it is farther in one fractional component. Fixed by explicitly comparing
+    // the 3^3 candidate images (0, +-one period, per direction) in Cartesian space and keeping the
+    // nearest -- the search need not go beyond +-1 period because the per-axis fold below already
+    // picked, for each direction on its own, one of the (at most two) candidates that can possibly be
+    // Cartesian-nearest.
     std::array<double, 3> dr1{0., 0., 0.};
     double r2 = 0.;
     for (int j1 = 0; j1 < S[0]; ++j1) {
@@ -789,10 +798,29 @@ void WannierWavefunctions::centre_and_spread(int iw__, double& norm__, std::arra
                 for (int ipol = 0; ipol < npol_; ++ipol) {
                     rho += std::norm(w_[iw__][ipol][i]);
                 }
-                const double df[3] = {df1, df2, df3};
-                std::array<double, 3> dr;
-                for (int x = 0; x < 3; ++x) {
-                    dr[x] = df[0] * a_[0][x] + df[1] * a_[1][x] + df[2] * a_[2][x];
+                const double df0[3] = {df1, df2, df3};
+                std::array<double, 3> dr{df0[0] * a_[0][0] + df0[1] * a_[1][0] + df0[2] * a_[2][0],
+                                          df0[0] * a_[0][1] + df0[1] * a_[1][1] + df0[2] * a_[2][1],
+                                          df0[0] * a_[0][2] + df0[1] * a_[1][2] + df0[2] * a_[2][2]};
+                double d2min = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
+                for (int n1 = -1; n1 <= 1; ++n1) {
+                    for (int n2 = -1; n2 <= 1; ++n2) {
+                        for (int n3 = -1; n3 <= 1; ++n3) {
+                            if (n1 == 0 && n2 == 0 && n3 == 0) {
+                                continue;
+                            }
+                            const double df[3] = {df1 + n1 * double(M[0]), df2 + n2 * double(M[1]),
+                                                   df3 + n3 * double(M[2])};
+                            const std::array<double, 3> dr2{df[0] * a_[0][0] + df[1] * a_[1][0] + df[2] * a_[2][0],
+                                                              df[0] * a_[0][1] + df[1] * a_[1][1] + df[2] * a_[2][1],
+                                                              df[0] * a_[0][2] + df[1] * a_[1][2] + df[2] * a_[2][2]};
+                            const double d2 = dr2[0] * dr2[0] + dr2[1] * dr2[1] + dr2[2] * dr2[2];
+                            if (d2 < d2min) {
+                                d2min = d2;
+                                dr    = dr2;
+                            }
+                        }
+                    }
                 }
                 for (int x = 0; x < 3; ++x) {
                     dr1[x] += rho * dr[x];
