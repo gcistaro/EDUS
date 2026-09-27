@@ -20,6 +20,7 @@ option(EDUS_BATCHGEMM   "Enabling Batch Gemm for k matrix multiplication"      O
 option(EDUS_FFTWTHREADS "Enabling threads in fftw"                             OFF)                
 option(EDUS_MKL_THREAD  "Enabling threads in mkl"                              OFF)                  
 option(EDUS_HDF5        "Link hdf5 library for fast writing of big matrices"   OFF)
+option(EDUS_SPFFT       "Link SpFFT for MPI-distributed real-space FFTs"       OFF)
 option(EDUS_GPU         "Compile with GPU support"                             OFF)
 option(__DEBUG          ""                                                     OFF)
 
@@ -34,6 +35,7 @@ add_compile_definitions(
     $<$<BOOL:${EDUS_FFTWTHREADS}>:EDUS_FFTWTHREADS>
     $<$<BOOL:${EDUS_MKL_THREAD}>:EDUS_MKL_THREAD>
     $<$<BOOL:${EDUS_HDF5}>:EDUS_HDF5>
+    $<$<BOOL:${EDUS_SPFFT}>:EDUS_SPFFT>
     $<$<BOOL:${EDUS_GPU}>:EDUS_GPU>
     $<$<BOOL:${__DEBUG}>:__DEBUG>
 )
@@ -195,6 +197,18 @@ if(EDUS_HDF5)
     message(STATUS "HDF5 include directories: ${HDF5_INCLUDE_DIRS}")
     include_directories(${HDF5_INCLUDE_DIRS})
     target_link_libraries(core PUBLIC HDF5::HDF5)
+endif()
+
+# =================================================================================
+# SpFFT (MPI-distributed sparse-to-dense real-space FFT, used to build w_n(r)
+# without every rank holding the full dense FFT box of a k point)
+# =================================================================================
+if(EDUS_SPFFT)
+    if(NOT EDUS_MPI)
+        message(FATAL_ERROR "EDUS_SPFFT requires EDUS_MPI=ON (a single-rank build gains nothing from it)")
+    endif()
+    find_package(SpFFT CONFIG REQUIRED)
+    target_link_libraries(core PUBLIC SpFFT::spfft)
 endif()
 
 

@@ -4,12 +4,14 @@
 #include <array>
 #include <complex>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "Json/json.hpp"
 #include "Wannier/QEWavefunction.hpp"
 #include "Wannier/WannierGauge.hpp"
+#include "core/mpi/Communicator.hpp"
 
 /// Input of the QE -> Wannier rotation (see WannierWavefunctionsParameters::from_json for the keys)
 struct WannierWavefunctionsParameters
@@ -35,6 +37,11 @@ struct WannierWavefunctionsParameters
     /// multiply each w_n(r) by a global phase making it (as much as possible) real, as wannier90 does
     bool fix_phase    = true;
     std::string output_dir = "wannier_wfc";
+    /// number of MPI ranks that jointly build w_n(r) for one k point, via a distributed FFT
+    /// (SpFFT; requires EDUS built with -DEDUS_SPFFT=ON -DEDUS_MPI=ON) instead of the default
+    /// (1) where a single rank holds the whole dense FFT box of its k point alone. Must divide
+    /// the total number of MPI ranks.
+    int fft_ranks_per_kpoint = 1;
 
     static WannierWavefunctionsParameters from_json(const nlohmann::json& in__);
 };
@@ -68,9 +75,30 @@ class WannierWavefunctions
         std::vector<std::pair<std::string, std::array<double, 3>>> atoms_;
         double max_orthonormality_error_ = 0.;
 
+        /// group of ranks that jointly build w_n(r) for one k point (see fft_ranks_per_kpoint).
+        /// Different groups process different k points in parallel, like plain MPI ranks did
+        /// before (fft_group_id_/num_fft_groups_ reduce to mpi_rank()/mpi_size() when
+        /// fft_ranks_per_kpoint == 1, i.e. one rank per group).
+        int fft_group_id_   = 0;
+        int num_fft_groups_ = 1;
+        /// non-null only if fft_ranks_per_kpoint > 1: the ranks of this rank's group
+        std::unique_ptr<mpi::Communicator> fft_comm_;
+        /// even split of the fft_grid_ z axis among fft_comm_ ranks: fft_z_offset_[r]/fft_z_len_[r]
+        /// is the range of global z indices owned by rank r of fft_comm_ in accumulate_real_space
+        std::vector<int> fft_z_offset_, fft_z_len_;
+
         void map_kpoints();
         void read_atoms();
+        void setup_fft_groups();
+        bool is_fft_group_leader() const { return !fft_comm_ || fft_comm_->rank() == 0; }
         void accumulate_real_space(int ik__, const QEWavefunction& wf__);
+#if defined(EDUS_SPFFT) && defined(EDUS_MPI)
+        /// accumulate_real_space's distributed path: fft_comm_ ranks jointly build w_n(r) for one
+        /// k point via SpFFT, each rank inserting only the z-slab of the real-space box it owns.
+        void accumulate_real_space_distributed(int ik__, const QEWavefunction& wf__, const std::complex<double>* ph0,
+                                               const std::complex<double>* ph1, const std::complex<double>* ph2,
+                                               double norm__);
+#endif
 
     public:
         explicit WannierWavefunctions(const WannierWavefunctionsParameters& params__);

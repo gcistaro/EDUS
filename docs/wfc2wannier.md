@@ -45,6 +45,7 @@ lattice vector, whose Miller indices are shifted accordingly).
 | `write_xsf` | `true` | write the XSF files |
 | `fix_phase` | `true` | global phase making $w_n(\mathbf r)$ as real as possible (as wannier90) |
 | `output_dir` | `"wannier_wfc"` | output folder |
+| `fft_ranks_per_kpoint` | `1` | number of MPI ranks that jointly build $w_n(\mathbf r)$ for one k point via a distributed FFT (SpFFT), instead of one rank alone holding the whole dense FFT grid. Requires `-DEDUS_SPFFT=ON -DEDUS_MPI=ON`; must divide the total number of ranks |
 
 Why `.eig` and the outer window: the rows of `u_dis.mat` refer only to the bands inside the outer window
 (packed, the others are zero). If the window contains all the bands nothing else is needed; otherwise the code
@@ -81,6 +82,26 @@ format, regardless of the input format.
 The HDF5 reader follows QE's on-disk layout exactly (`Modules/io_base.f90`, `Modules/qeh5_module.f90`): the
 `ik`, `xk`, `ispin`, `gamma_only`, `scale_factor`, `ngw`, `igwx`, `npol`, `nbnd` attributes on the file root,
 the `bg1`/`bg2`/`bg3` array attributes on the `MillerIndices` dataset, and the `MillerIndices`/`evc` datasets.
+
+## Distributed real-space FFT (`fft_ranks_per_kpoint`)
+
+By default (`fft_ranks_per_kpoint = 1`) each MPI rank builds $w_n(\mathbf r)$ for its own k points one at a
+time, and for each one it holds the *whole* dense `fft_grid_` box in memory to inverse-FFT the plane-wave
+coefficients (a plain `fftw_plan_dft_3d`, unchanged from before). For a large cell or a small number of k
+points relative to the number of ranks, that box can be the dominant memory cost of the run, even though the
+underlying data (the wavefunction's plane-wave coefficients) is sparse.
+
+Setting `fft_ranks_per_kpoint > 1` groups that many consecutive MPI ranks together to build $w_n(\mathbf r)$
+for one k point jointly, via [SpFFT](https://github.com/eth-cscs/SpFFT) (EDUS built with `-DEDUS_SPFFT=ON
+-DEDUS_MPI=ON`): SpFFT distributes the sparse G vectors as whole z-columns and the dense real-space box as
+z-slabs across the group, so no single rank ever allocates the full box — only its own slab. Different groups
+still process different k points in parallel, exactly as plain ranks did before (`fft_ranks_per_kpoint = 1` is
+one rank per group, unchanged). `mpi_size()` must be a multiple of `fft_ranks_per_kpoint`.
+
+Every rank of a group still reads and rotates the k point's wavefunction independently (that part is cheap:
+its size is the number of plane waves, not the dense grid); only the real-space accumulation is distributed,
+and only the group's leader (rank 0 of the group) writes the rotated Bloch functions and checks orthonormality,
+to avoid every rank of the group writing the same file.
 
 ## Tests
 

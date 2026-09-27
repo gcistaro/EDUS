@@ -7,12 +7,17 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 #ifdef EDUS_MPI
 #include <fftw3-mpi.h>
 #include "core/mpi/Communicator.hpp"
 #else
 #include <fftw3.h>
+#endif
+
+#if defined(EDUS_SPFFT) && defined(EDUS_MPI)
+#include <spfft/spfft.hpp>
 #endif
 
 #include "Constants.hpp"
@@ -107,6 +112,7 @@ WannierWavefunctionsParameters WannierWavefunctionsParameters::from_json(const n
     p.write_xsf   = in__.value("write_xsf", p.write_xsf);
     p.fix_phase   = in__.value("fix_phase", p.fix_phase);
     p.output_dir  = in__.value("output_dir", p.output_dir);
+    p.fft_ranks_per_kpoint = in__.value("fft_ranks_per_kpoint", p.fft_ranks_per_kpoint);
     return p;
 }
 
@@ -139,6 +145,7 @@ WannierWavefunctions::WannierWavefunctions(const WannierWavefunctionsParameters&
     }
 
     map_kpoints();
+    setup_fft_groups();
     read_atoms();
 
     if (gauge_.suspicious_window_kpoints() > 0 && mpi_rank() == 0) {
@@ -250,6 +257,54 @@ void WannierWavefunctions::map_kpoints()
     }
 }
 
+void WannierWavefunctions::setup_fft_groups()
+{
+    if (p_.fft_ranks_per_kpoint < 1) {
+        throw std::runtime_error("WannierWavefunctions: fft_ranks_per_kpoint must be >= 1");
+    }
+#if !(defined(EDUS_SPFFT) && defined(EDUS_MPI))
+    if (p_.fft_ranks_per_kpoint > 1) {
+        throw std::runtime_error(
+            "WannierWavefunctions: fft_ranks_per_kpoint > 1 requires EDUS built with "
+            "-DEDUS_SPFFT=ON -DEDUS_MPI=ON (otherwise every rank would have to hold the "
+            "full dense FFT box of a k point alone)");
+    }
+#endif
+    if (mpi_size() % p_.fft_ranks_per_kpoint != 0) {
+        throw std::runtime_error(
+            "WannierWavefunctions: fft_ranks_per_kpoint must divide the total number of MPI ranks");
+    }
+    // groups of fft_ranks_per_kpoint consecutive ranks each own one k point at a time; different
+    // groups process different k points in parallel, exactly as plain ranks did before (reduces to
+    // fft_group_id_ == mpi_rank(), num_fft_groups_ == mpi_size() when fft_ranks_per_kpoint == 1).
+    num_fft_groups_ = mpi_size() / p_.fft_ranks_per_kpoint;
+    fft_group_id_   = mpi_rank() / p_.fft_ranks_per_kpoint;
+
+#if defined(EDUS_SPFFT) && defined(EDUS_MPI)
+    if (p_.fft_ranks_per_kpoint > 1) {
+        fft_comm_ = std::make_unique<mpi::Communicator>();
+        fft_comm_->generate(mpi::Communicator::world(), fft_group_id_);
+
+        // Even slab split of the fft_grid_ z axis among the ranks of the group (the first
+        // `remainder` ranks get one extra plane), fixed for the whole run: accumulate_real_space
+        // only ever inserts into the z range owned by this rank into w_, so summing every rank's
+        // contribution (done once, at the end of run(), exactly as before) reconstructs w_n(r).
+        const int n3    = fft_grid_[2];
+        const int gsize = fft_comm_->size();
+        const int base  = n3 / gsize;
+        const int rem    = n3 % gsize;
+        fft_z_offset_.assign(gsize, 0);
+        fft_z_len_.assign(gsize, 0);
+        int z = 0;
+        for (int r = 0; r < gsize; ++r) {
+            fft_z_len_[r]    = base + (r < rem ? 1 : 0);
+            fft_z_offset_[r] = z;
+            z += fft_z_len_[r];
+        }
+    }
+#endif
+}
+
 void WannierWavefunctions::read_atoms()
 {
     // the save directory is <outdir>/<prefix>.save
@@ -335,6 +390,104 @@ QEWavefunction WannierWavefunctions::bloch_wannier_gauge(int ik__) const
     return out;
 }
 
+#if defined(EDUS_SPFFT) && defined(EDUS_MPI)
+void WannierWavefunctions::accumulate_real_space_distributed(int ik__, const QEWavefunction& wf__,
+                                                              const std::complex<double>* ph0,
+                                                              const std::complex<double>* ph1,
+                                                              const std::complex<double>* ph2,
+                                                              double norm__)
+{
+    const int N1 = fft_grid_[0], N2 = fft_grid_[1], N3 = fft_grid_[2];
+    auto S       = supercell_grid();
+    int s0[3]    = {supercell_start(0), supercell_start(1), supercell_start(2)};
+
+    const int gsize = fft_comm_->size();
+    const int grank = fft_comm_->rank();
+    const int zOff  = fft_z_offset_[grank];
+    const int zLen  = fft_z_len_[grank];
+
+    // Columns (fixed x-y pairs) owned by this rank, round-robin on their linear index: every G
+    // vector folding into an owned column is grouped here (>1 G's can fold to the same point when
+    // fft_grid_ is smaller than 2*max_miller+1, exactly as the "+=" of the non-distributed path
+    // below handles); this is recomputed per k point since the Miller indices differ per k, but is
+    // the same for every band/spin component of this k, so it is built once here.
+    struct LocalPoint {
+        int i1, i2, i3;
+        std::vector<int> igs;
+    };
+    std::vector<LocalPoint> local_points;
+    {
+        std::unordered_map<long long, int> index_of;
+        for (int ig = 0; ig < wf__.igwx; ++ig) {
+            int i1 = positive_mod(wf__.miller(ig, 0), N1);
+            int i2 = positive_mod(wf__.miller(ig, 1), N2);
+            int i3 = positive_mod(wf__.miller(ig, 2), N3);
+            if ((i1 * N2 + i2) % gsize != grank) {
+                continue;
+            }
+            long long key = (static_cast<long long>(i1) * N2 + i2) * N3 + i3;
+            auto it        = index_of.find(key);
+            if (it == index_of.end()) {
+                index_of.emplace(key, int(local_points.size()));
+                local_points.push_back({i1, i2, i3, {ig}});
+            } else {
+                local_points[it->second].igs.push_back(ig);
+            }
+        }
+    }
+
+    std::vector<int> local_indices;
+    local_indices.reserve(3 * local_points.size());
+    for (auto& p : local_points) {
+        local_indices.push_back(p.i1);
+        local_indices.push_back(p.i2);
+        local_indices.push_back(p.i3);
+    }
+    const int num_local = int(local_points.size());
+
+    spfft::Transform transform(/*maxNumThreads=*/1, fft_comm_->communicator(), SPFFT_EXCH_DEFAULT, SPFFT_PU_HOST,
+                               SPFFT_TRANS_C2C, N1, N2, N3, zLen, num_local, SPFFT_INDEX_TRIPLETS,
+                               local_indices.data());
+    std::vector<std::complex<double>> local_freq(num_local);
+
+    for (size_t iw = 0; iw < wannier_list_.size(); ++iw) {
+        const int n = wannier_list_[iw];
+        for (int ipol = 0; ipol < npol_; ++ipol) {
+            for (int k = 0; k < num_local; ++k) {
+                std::complex<double> c = 0.;
+                for (int ig : local_points[k].igs) {
+                    c += wf__.evc(n, ipol * wf__.igwx + ig);
+                }
+                local_freq[k] = c;
+            }
+            transform.backward(reinterpret_cast<const double*>(local_freq.data()), SPFFT_PU_HOST);
+            auto* space = reinterpret_cast<std::complex<double>*>(transform.space_domain_data(SPFFT_PU_HOST));
+            // SpFFT space-domain layout: (zLocal * N2 + i2) * N1 + i1, zLocal in [0, zLen)
+
+            auto& w = w_[iw][ipol];
+            #pragma omp parallel for
+            for (int j1 = 0; j1 < S[0]; ++j1) {
+                const int i1   = positive_mod(s0[0] + j1, N1);
+                const auto ph1v = ph0[j1];
+                for (int j2 = 0; j2 < S[1]; ++j2) {
+                    const int i2  = positive_mod(s0[1] + j2, N2);
+                    const auto p12 = ph1v * ph1[j2] * norm__;
+                    for (int j3 = 0; j3 < S[2]; ++j3) {
+                        const int i3 = positive_mod(s0[2] + j3, N3);
+                        if (i3 < zOff || i3 >= zOff + zLen) {
+                            continue; // owned by a different rank of this group
+                        }
+                        const int zLocal = i3 - zOff;
+                        w[(size_t(j1) * S[1] + j2) * S[2] + j3] +=
+                            p12 * ph2[j3] * space[(zLocal * N2 + i2) * N1 + i1];
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
 void WannierWavefunctions::accumulate_real_space(int ik__, const QEWavefunction& wf__)
 {
     const int N1 = fft_grid_[0], N2 = fft_grid_[1], N3 = fft_grid_[2];
@@ -351,11 +504,18 @@ void WannierWavefunctions::accumulate_real_space(int ik__, const QEWavefunction&
             ph[x][i] = std::exp(im * 2. * pi * kw[x] * double(s0[x] + i) / double(fft_grid_[x]));
         }
     }
+    const double norm = 1. / std::sqrt(omega_);
+
+#if defined(EDUS_SPFFT) && defined(EDUS_MPI)
+    if (fft_comm_) {
+        accumulate_real_space_distributed(ik__, wf__, ph[0].data(), ph[1].data(), ph[2].data(), norm);
+        return;
+    }
+#endif
 
     auto* buffer = reinterpret_cast<std::complex<double>*>(fftw_malloc(sizeof(fftw_complex) * Nr));
     auto plan    = fftw_plan_dft_3d(N1, N2, N3, reinterpret_cast<fftw_complex*>(buffer),
                                     reinterpret_cast<fftw_complex*>(buffer), FFTW_BACKWARD, FFTW_ESTIMATE);
-    const double norm = 1. / std::sqrt(omega_);
 
     for (size_t iw = 0; iw < wannier_list_.size(); ++iw) {
         const int n = wannier_list_[iw];
@@ -413,6 +573,10 @@ void WannierWavefunctions::run()
             std::cout << "  FFT grid (cell)    : " << fft_grid_[0] << " " << fft_grid_[1] << " " << fft_grid_[2] << "\n"
                       << "  supercell          : " << p_.supercell[0] << " " << p_.supercell[1] << " "
                       << p_.supercell[2] << "\n";
+            if (p_.fft_ranks_per_kpoint > 1) {
+                std::cout << "  fft_ranks_per_kpoint: " << p_.fft_ranks_per_kpoint << " (SpFFT, " << num_fft_groups_
+                          << " k-point groups)\n";
+            }
         }
     }
     {
@@ -430,23 +594,30 @@ void WannierWavefunctions::run()
     }
 
     max_orthonormality_error_ = 0.;
-    for (int ik = rank; ik < nk; ik += size) {
+    // fft_group_id_/num_fft_groups_ reduce to rank/size when fft_ranks_per_kpoint == 1 (the
+    // default): every rank is then its own group of size 1, exactly as before. With
+    // fft_ranks_per_kpoint > 1, a whole group of ranks processes the same k point together
+    // (each redundantly reads and rotates it; only the group leader writes/checks it once),
+    // so that accumulate_real_space can distribute that k point's real-space FFT across the group.
+    for (int ik = fft_group_id_; ik < nk; ik += num_fft_groups_) {
         auto wf = bloch_wannier_gauge(ik);
 
-        // orthonormality of the rotated Bloch functions (exact only for norm-conserving PP)
-        const int npw = wf.npol * wf.igwx;
-        for (int n1 = 0; n1 < wf.nbnd; ++n1) {
-            for (int n2 = 0; n2 < wf.nbnd; ++n2) {
-                std::complex<double> s = 0.;
-                for (int ig = 0; ig < npw; ++ig) {
-                    s += std::conj(wf.evc(n1, ig)) * wf.evc(n2, ig);
+        if (is_fft_group_leader()) {
+            // orthonormality of the rotated Bloch functions (exact only for norm-conserving PP)
+            const int npw = wf.npol * wf.igwx;
+            for (int n1 = 0; n1 < wf.nbnd; ++n1) {
+                for (int n2 = 0; n2 < wf.nbnd; ++n2) {
+                    std::complex<double> s = 0.;
+                    for (int ig = 0; ig < npw; ++ig) {
+                        s += std::conj(wf.evc(n1, ig)) * wf.evc(n2, ig);
+                    }
+                    max_orthonormality_error_ = std::max(max_orthonormality_error_, std::abs(s - (n1 == n2 ? 1. : 0.)));
                 }
-                max_orthonormality_error_ = std::max(max_orthonormality_error_, std::abs(s - (n1 == n2 ? 1. : 0.)));
             }
-        }
 
-        if (p_.write_bloch) {
-            wf.write(p_.output_dir + "/wfc" + std::to_string(ik + 1) + ".dat");
+            if (p_.write_bloch) {
+                wf.write(p_.output_dir + "/wfc" + std::to_string(ik + 1) + ".dat");
+            }
         }
         if (p_.real_space) {
             accumulate_real_space(ik, wf);
