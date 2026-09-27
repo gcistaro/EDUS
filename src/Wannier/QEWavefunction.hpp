@@ -65,8 +65,13 @@ struct QEWavefunction
     std::array<int, 3> max_miller() const;
 };
 
-/// Path of the wfc file of the k point ik (1-based, as in QE).
+/// Path of the (binary, ".dat") wfc file of the k point ik (1-based, as in QE).
 /// spin = 0 for nspin=1/noncollinear, 1 (up) or 2 (down) for LSDA (wfcup<ik>.dat/wfcdw<ik>.dat)
+/// Used to name the rotated Bloch functions written by WannierWavefunctions (always plain binary).
 std::string qe_wfc_filename(const std::string& savedir__, int ik__, int spin__ = 0);
+
+/// Path of the wfc file of the k point ik actually present on disk: QE writes either wfc<ik>.dat (plain binary)
+/// or wfc<ik>.hdf5 (compiled with -D__HDF5), never both. Returns an empty string if neither exists.
+std::string resolve_qe_wfc_file(const std::string& savedir__, int ik__, int spin__ = 0);
 
 #endif

@@ -161,8 +161,8 @@ void WannierWavefunctions::map_kpoints()
     std::vector<std::array<double, 3>> kqe;
     int max_miller[3] = {0, 0, 0};
     for (int ik = 1;; ++ik) {
-        auto name = qe_wfc_filename(p_.qe_save_dir, ik, p_.spin);
-        if (!std::filesystem::exists(name)) {
+        auto name = resolve_qe_wfc_file(p_.qe_save_dir, ik, p_.spin);
+        if (name.empty()) {
             break;
         }
         auto wf = QEWavefunction::read(name, QEWavefunction::Content::header);
@@ -178,7 +178,8 @@ void WannierWavefunctions::map_kpoints()
     }
     if (kqe.empty()) {
         throw std::runtime_error("WannierWavefunctions: no file " + qe_wfc_filename(p_.qe_save_dir, 1, p_.spin) +
-                                 " (a QE compiled with HDF5 writes wfc<ik>.hdf5, not supported yet)");
+                                 " or " + p_.qe_save_dir + "/wfc1.hdf5 (checked for spin = " +
+                                 std::to_string(p_.spin) + ")");
     }
     // check early that the number of bands is consistent with wannier90
     gauge_.qe_to_w90_bands(nbnd_qe_);
@@ -231,7 +232,7 @@ void WannierWavefunctions::map_kpoints()
         fft_grid_ = p_.fft_grid;
     } else if (p_.real_space) {
         for (int ik = 0; ik < nk; ++ik) {
-            auto wf = QEWavefunction::read(qe_wfc_filename(p_.qe_save_dir, qe_index_[ik], p_.spin),
+            auto wf = QEWavefunction::read(resolve_qe_wfc_file(p_.qe_save_dir, qe_index_[ik], p_.spin),
                                            QEWavefunction::Content::header_and_miller);
             // for gamma_only files -G is missing, but |m| is symmetric
             for (int ig = 0; ig < wf.igwx; ++ig) {
@@ -295,11 +296,11 @@ void WannierWavefunctions::read_atoms()
 
 QEWavefunction WannierWavefunctions::bloch_wannier_gauge(int ik__) const
 {
-    auto wf = QEWavefunction::read(qe_wfc_filename(p_.qe_save_dir, qe_index_[ik__], p_.spin));
+    auto wf = QEWavefunction::read(resolve_qe_wfc_file(p_.qe_save_dir, qe_index_[ik__], p_.spin));
     wf.expand_gamma();
     if (wf.nbnd != nbnd_qe_) {
         throw std::runtime_error("WannierWavefunctions: inconsistent nbnd in " +
-                                 qe_wfc_filename(p_.qe_save_dir, qe_index_[ik__], p_.spin));
+                                 resolve_qe_wfc_file(p_.qe_save_dir, qe_index_[ik__], p_.spin));
     }
     const int nw  = gauge_.num_wann();
     const int npw = wf.npol * wf.igwx;

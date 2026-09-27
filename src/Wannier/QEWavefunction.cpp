@@ -1,12 +1,19 @@
 #include <cmath>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
+
+#ifdef EDUS_HDF5
+#include <hdf5.h>
+#endif
 
 #include "Constants.hpp"
 #include "Wannier/FortranBinary.hpp"
 #include "Wannier/QEWavefunction.hpp"
 
-std::string qe_wfc_filename(const std::string& savedir__, int ik__, int spin__)
+namespace {
+
+std::string qe_wfc_basename(const std::string& savedir__, int ik__, int spin__)
 {
     std::stringstream ss;
     ss << savedir__;
@@ -19,12 +26,181 @@ std::string qe_wfc_filename(const std::string& savedir__, int ik__, int spin__)
     } else if (spin__ == 2) {
         ss << "dw";
     }
-    ss << ik__ << ".dat";
+    ss << ik__;
     return ss.str();
+}
+
+#ifdef EDUS_HDF5
+/// Reads one HDF5 attribute, matching the exact type wannier90/QE (Modules/qeh5_module.f90) uses to write it.
+/// This mirrors the low-level calls of QE's own reader rather than the H5LT convenience API, since the array-typed
+/// attributes below (a single element whose datatype is "array of 3 doubles", not a length-3 attribute) are a case
+/// the generic H5LT calls are not guaranteed to unpack correctly.
+herr_t hdf5_read_scalar_attr(hid_t loc__, const char* name__, hid_t mem_type__, void* value__)
+{
+    hid_t attr = H5Aopen_by_name(loc__, ".", name__, H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0) {
+        return -1;
+    }
+    herr_t status = H5Aread(attr, mem_type__, value__);
+    H5Aclose(attr);
+    return status;
+}
+
+/// Reads an attribute stored as a single element of array-of-3-doubles type (xk, bg1, bg2, bg3 in QE's HDF5 wfc
+/// files), as opposed to a plain 3-element vector attribute.
+herr_t hdf5_read_array3_attr(hid_t loc__, const char* name__, double value__[3])
+{
+    hid_t attr = H5Aopen_by_name(loc__, ".", name__, H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0) {
+        return -1;
+    }
+    hsize_t dims[1] = {3};
+    hid_t arr_type  = H5Tarray_create(H5T_NATIVE_DOUBLE, 1, dims);
+    herr_t status   = H5Aread(attr, arr_type, value__);
+    H5Tclose(arr_type);
+    H5Aclose(attr);
+    return status;
+}
+
+herr_t hdf5_read_string_attr(hid_t loc__, const char* name__, std::string& value__)
+{
+    hid_t attr = H5Aopen_by_name(loc__, ".", name__, H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0) {
+        return -1;
+    }
+    hid_t file_type = H5Aget_type(attr);
+    size_t nbytes    = H5Tget_size(file_type);
+    std::vector<char> buf(nbytes + 1, '\0');
+    herr_t status = H5Aread(attr, file_type, buf.data());
+    H5Tclose(file_type);
+    H5Aclose(attr);
+    value__.assign(buf.data());
+    return status;
+}
+
+/// Reads a wfc<ik>.hdf5 file (QE compiled with -D__HDF5), as written by Modules/io_base.f90::write_wfc.
+/// File-root attributes: ik, xk (array-of-3-double), ispin, gamma_only (string), scale_factor, ngw, igwx, npol, nbnd.
+/// Dataset "MillerIndices" (int, (igwx,3) in C order), with attributes bg1/bg2/bg3 (array-of-3-double).
+/// Dataset "evc" (double, (nbnd, 2*npol*igwx) in C order: real/imag interleaved, contiguous per band).
+QEWavefunction read_hdf5(const std::string& filename__, QEWavefunction::Content content__)
+{
+    QEWavefunction wf;
+    hid_t file = H5Fopen(filename__.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0) {
+        throw std::runtime_error("QEWavefunction::read: cannot open " + filename__);
+    }
+    auto fail = [&](const std::string& what__) {
+        H5Fclose(file);
+        throw std::runtime_error("QEWavefunction::read: cannot read attribute/dataset '" + what__ + "' in " +
+                                 filename__ + " (unexpected HDF5 layout)");
+    };
+    int ik_int;
+    if (hdf5_read_scalar_attr(file, "ik", H5T_NATIVE_INT, &ik_int) < 0) {
+        fail("ik");
+    }
+    wf.ik = ik_int;
+    if (hdf5_read_array3_attr(file, "xk", wf.xk.data()) < 0) {
+        fail("xk");
+    }
+    if (hdf5_read_scalar_attr(file, "ispin", H5T_NATIVE_INT, &wf.ispin) < 0) {
+        fail("ispin");
+    }
+    std::string gamma_str;
+    if (hdf5_read_string_attr(file, "gamma_only", gamma_str) < 0) {
+        fail("gamma_only");
+    }
+    wf.gamma_only = (gamma_str.find("TRUE") != std::string::npos || gamma_str.find("true") != std::string::npos);
+    if (hdf5_read_scalar_attr(file, "scale_factor", H5T_NATIVE_DOUBLE, &wf.scalef) < 0) {
+        fail("scale_factor");
+    }
+    int ngw_int, igwx_int, npol_int, nbnd_int;
+    if (hdf5_read_scalar_attr(file, "ngw", H5T_NATIVE_INT, &ngw_int) < 0 ||
+        hdf5_read_scalar_attr(file, "igwx", H5T_NATIVE_INT, &igwx_int) < 0 ||
+        hdf5_read_scalar_attr(file, "npol", H5T_NATIVE_INT, &npol_int) < 0 ||
+        hdf5_read_scalar_attr(file, "nbnd", H5T_NATIVE_INT, &nbnd_int) < 0) {
+        fail("ngw/igwx/npol/nbnd");
+    }
+    wf.ngw = ngw_int; wf.igwx = igwx_int; wf.npol = npol_int; wf.nbnd = nbnd_int;
+    if (wf.igwx <= 0 || wf.nbnd <= 0 || (wf.npol != 1 && wf.npol != 2)) {
+        H5Fclose(file);
+        throw std::runtime_error("QEWavefunction::read: inconsistent header in " + filename__);
+    }
+
+    hid_t mill_dset = H5Dopen2(file, "MillerIndices", H5P_DEFAULT);
+    if (mill_dset < 0) {
+        fail("MillerIndices");
+    }
+    if (hdf5_read_array3_attr(mill_dset, "bg1", wf.b[0].data()) < 0 ||
+        hdf5_read_array3_attr(mill_dset, "bg2", wf.b[1].data()) < 0 ||
+        hdf5_read_array3_attr(mill_dset, "bg3", wf.b[2].data()) < 0) {
+        H5Dclose(mill_dset);
+        fail("bg1/bg2/bg3");
+    }
+    if (content__ == QEWavefunction::Content::header) {
+        H5Dclose(mill_dset);
+        H5Fclose(file);
+        return wf;
+    }
+
+    wf.miller.initialize({wf.igwx, 3});
+    if (H5Dread(mill_dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, wf.miller.data()) < 0) {
+        H5Dclose(mill_dset);
+        fail("MillerIndices");
+    }
+    H5Dclose(mill_dset);
+    if (content__ == QEWavefunction::Content::header_and_miller) {
+        H5Fclose(file);
+        return wf;
+    }
+
+    hid_t evc_dset = H5Dopen2(file, "evc", H5P_DEFAULT);
+    if (evc_dset < 0) {
+        fail("evc");
+    }
+    const int npw = wf.npol * wf.igwx;
+    wf.evc.initialize({wf.nbnd, npw});
+    // std::complex<double> has the same layout as two contiguous doubles (real, imag), matching how QE stores it
+    if (H5Dread(evc_dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, reinterpret_cast<double*>(wf.evc.data())) <
+        0) {
+        H5Dclose(evc_dset);
+        fail("evc");
+    }
+    H5Dclose(evc_dset);
+    H5Fclose(file);
+    return wf;
+}
+#endif
+
+} // namespace
+
+std::string qe_wfc_filename(const std::string& savedir__, int ik__, int spin__)
+{
+    return qe_wfc_basename(savedir__, ik__, spin__) + ".dat";
+}
+
+std::string resolve_qe_wfc_file(const std::string& savedir__, int ik__, int spin__)
+{
+    auto base = qe_wfc_basename(savedir__, ik__, spin__);
+    if (std::filesystem::exists(base + ".dat")) {
+        return base + ".dat";
+    }
+    if (std::filesystem::exists(base + ".hdf5")) {
+        return base + ".hdf5";
+    }
+    return {};
 }
 
 QEWavefunction QEWavefunction::read(const std::string& filename__, Content content__)
 {
+    if (filename__.size() >= 5 && filename__.compare(filename__.size() - 5, 5, ".hdf5") == 0) {
+#ifdef EDUS_HDF5
+        return read_hdf5(filename__, content__);
+#else
+        throw std::runtime_error(filename__ +
+                                 " is an HDF5 wavefunction file, but EDUS was compiled without HDF5 support "
+                                 "(cmake -DEDUS_HDF5=ON)");
+#endif
+    }
     QEWavefunction wf;
     FortranBinaryReader f(filename__);
 

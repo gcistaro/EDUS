@@ -22,8 +22,9 @@ wannier90.x seedname                # with  write_u_matrices = .true.  (and writ
 EDUS_wfc2wannier input.json         # mpirun -n N ... distributes the k points
 ```
 
-Requirements on the QE side: wavefunctions in the default binary format (`wfc<ik>.dat`; QE compiled with HDF5
-writes `wfc<ik>.hdf5`, not supported yet). The `nscf` k points can be in any order and in any periodic image of
+Requirements on the QE side: wavefunctions in either format written by `pw.x`, plain binary (`wfc<ik>.dat`) or,
+if QE was compiled with HDF5 (`-D__HDF5`), `wfc<ik>.hdf5` (EDUS must then be built with `-DEDUS_HDF5=ON`; see
+"HDF5 input" below). The `nscf` k points can be in any order and in any periodic image of
 the wannier90 ones: each k point of `u.mat` is matched with the QE file with the same k (modulo a reciprocal
 lattice vector, whose Miller indices are shifted accordingly).
 
@@ -68,6 +69,18 @@ The standard output also reports $\max\lvert V^\dagger V-1\rvert$ and the orthon
   $\langle\tilde\psi_n|\tilde\psi_m\rangle\neq\delta_{nm}$ and the norm of $w_n$ is not 1 (the same happens in `wannier_plot`).
 * Centres and spreads from the grid are approximate (grid spacing, finite supercell); the reference values are those in `seedname.wout`.
 * `gamma_only` files are expanded to the full G sphere; noncollinear (`npol = 2`) is supported.
+
+## HDF5 input
+
+When `pw.x` was compiled with HDF5 support it writes `wfc<ik>.hdf5` instead of `wfc<ik>.dat`; EDUS detects
+which one is present in `qe_save_dir` (`resolve_qe_wfc_file`) and reads it transparently, provided EDUS itself
+was configured with `-DEDUS_HDF5=ON` (the `EDUS_HDF5` CMake option already used for `output.h5`, see the main
+README). The output Bloch functions (`wfc<ik>.dat` in `output_dir`) are always written in the plain binary
+format, regardless of the input format.
+
+The HDF5 reader follows QE's on-disk layout exactly (`Modules/io_base.f90`, `Modules/qeh5_module.f90`): the
+`ik`, `xk`, `ispin`, `gamma_only`, `scale_factor`, `ngw`, `igwx`, `npol`, `nbnd` attributes on the file root,
+the `bg1`/`bg2`/`bg3` array attributes on the `MillerIndices` dataset, and the `MillerIndices`/`evc` datasets.
 
 ## Tests
 
