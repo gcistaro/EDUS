@@ -49,7 +49,7 @@ and the version of the code you used (see [Releases](https://github.com/gcistaro
 - MPI (OpenMPI or MPICH)
 - FFTW3 (with its MPI version when compiling with MPI)
 - BLAS/LAPACK/LAPACKE (e.g. OpenBLAS), or Intel MKL
-- *optional*: HDF5 (to write large matrices in `output.h5`), CUDA (GPU support)
+- *optional*: HDF5 (to write large matrices in `output.h5`), CUDA (GPU support), [SpFFT](https://github.com/eth-cscs/SpFFT) (MPI-distributed real-space FFT in `EDUS_wfc2wannier`)
 - Python 3 with `numpy` and `scipy` (model potentials and post-processing); `matplotlib`, `h5py` for some post-processing scripts
 
 When using modules on a cluster, MPI, FFTW and HDF5 must be built with the same compiler and MPI, for example:
@@ -80,6 +80,7 @@ The main CMake options (`cmake -D<OPTION>=ON ..`):
 | `EDUS_MKL` | `OFF` | Use Intel MKL for BLAS/LAPACK |
 | `EDUS_GPU` | `OFF` | GPU support (CUDA) |
 | `EDUS_HDF5` | `OFF` | Link HDF5 to write large matrices in `output.h5` |
+| `EDUS_SPFFT` | `OFF` | Link [SpFFT](https://github.com/eth-cscs/SpFFT) for the MPI-distributed real-space FFT in `EDUS_wfc2wannier` (requires `EDUS_MPI`) |
 | `EDUS_FFTWTHREADS` | `OFF` | Threads in FFTW |
 | `EDUS_MKL_THREAD` | `OFF` | Threads in MKL |
 | `EDUS_BATCHGEMM` | `OFF` | Batched GEMM for the k-point matrix multiplications |
@@ -248,6 +249,12 @@ Python scripts in [`Postproces/`](Postproces):
 | `Recap.py` | Plots of the main observables |
 | `RytovaKeldysh.py` | Rytova–Keldysh potential for a Wannier90 model |
 | `hermitize_tb.py` | Makes a `seedname_tb.dat` file exactly Hermitian |
+
+### Wavefunctions in the Wannier basis
+
+`EDUS_wfc2wannier input.json` reads the wavefunctions of Quantum ESPRESSO (`wfc*.dat`) and rotates them with
+`seedname_u.mat`/`seedname_u_dis.mat` of wannier90: it writes the Bloch functions in the Wannier gauge and the
+Wannier functions in real space (XSF). See [`docs/wfc2wannier.md`](docs/wfc2wannier.md).
 
 ---
 
