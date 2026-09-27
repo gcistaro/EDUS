@@ -730,39 +730,87 @@ void WannierWavefunctions::run()
 void WannierWavefunctions::centre_and_spread(int iw__, double& norm__, std::array<double, 3>& centre__,
                                              double& spread__) const
 {
-    auto S       = supercell_grid();
-    int s0[3]    = {supercell_start(0), supercell_start(1), supercell_start(2)};
+    auto S          = supercell_grid();
+    int s0[3]       = {supercell_start(0), supercell_start(1), supercell_start(2)};
     const double dV = omega_ / (double(fft_grid_[0]) * fft_grid_[1] * fft_grid_[2]);
-    double n = 0., r2 = 0.;
-    std::array<double, 3> r1{0., 0., 0.};
+    // w_n(r) is built as (1/Nk) sum_k e^{ik.r} u_nk(r): with a finite k mesh it is exactly periodic
+    // on the Born-von Karman supercell (mp_grid unit cells along each direction), regardless of how
+    // large a chunk of it `supercell` samples. A plain (unwrapped) second moment is only correct as
+    // long as the sampled box is small compared to that period; once `supercell` approaches or equals
+    // mp_grid, density near one edge of the box is really close (through the periodic boundary) to
+    // density near the opposite edge, and must be treated as such. Both passes below fold displacements
+    // modulo mp_grid, so the result is insensitive to how large `supercell` is (as it should be).
+    const auto& M = gauge_.mp_grid();
+
+    // Pass 1: periodic ("circular") mean of the fractional coordinate along each direction, which
+    // is well defined even when w_n(r) wraps around the supercell.
+    double n = 0.;
+    std::complex<double> z[3] = {0., 0., 0.};
     for (int j1 = 0; j1 < S[0]; ++j1) {
+        const double f1 = double(s0[0] + j1) / fft_grid_[0];
         for (int j2 = 0; j2 < S[1]; ++j2) {
+            const double f2 = double(s0[1] + j2) / fft_grid_[1];
             for (int j3 = 0; j3 < S[2]; ++j3) {
+                const double f3 = double(s0[2] + j3) / fft_grid_[2];
                 size_t i   = (size_t(j1) * S[1] + j2) * S[2] + j3;
                 double rho = 0.;
                 for (int ipol = 0; ipol < npol_; ++ipol) {
                     rho += std::norm(w_[iw__][ipol][i]);
                 }
-                double f[3] = {double(s0[0] + j1) / fft_grid_[0], double(s0[1] + j2) / fft_grid_[1],
-                               double(s0[2] + j3) / fft_grid_[2]};
-                std::array<double, 3> r;
-                for (int x = 0; x < 3; ++x) {
-                    r[x] = f[0] * a_[0][x] + f[1] * a_[1][x] + f[2] * a_[2][x];
-                }
                 n += rho;
+                const double f[3] = {f1, f2, f3};
                 for (int x = 0; x < 3; ++x) {
-                    r1[x] += rho * r[x];
+                    z[x] += rho * std::exp(im * 2. * pi * f[x] / double(M[x]));
                 }
-                r2 += rho * (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+            }
+        }
+    }
+    // preliminary centre, fractional coordinates (unit cell units), one representative per period
+    double f0[3];
+    for (int x = 0; x < 3; ++x) {
+        f0[x] = double(M[x]) * std::arg(z[x]) / (2. * pi);
+    }
+
+    // Pass 2: second moment of the minimum-image displacement from f0 (each direction folded modulo
+    // mp_grid), then the usual Var(r) = E[dr^2] - E[dr]^2 correction to refine the centre.
+    std::array<double, 3> dr1{0., 0., 0.};
+    double r2 = 0.;
+    for (int j1 = 0; j1 < S[0]; ++j1) {
+        double df1 = double(s0[0] + j1) / fft_grid_[0] - f0[0];
+        df1 -= double(M[0]) * std::round(df1 / M[0]);
+        for (int j2 = 0; j2 < S[1]; ++j2) {
+            double df2 = double(s0[1] + j2) / fft_grid_[1] - f0[1];
+            df2 -= double(M[1]) * std::round(df2 / M[1]);
+            for (int j3 = 0; j3 < S[2]; ++j3) {
+                double df3 = double(s0[2] + j3) / fft_grid_[2] - f0[2];
+                df3 -= double(M[2]) * std::round(df3 / M[2]);
+                size_t i   = (size_t(j1) * S[1] + j2) * S[2] + j3;
+                double rho = 0.;
+                for (int ipol = 0; ipol < npol_; ++ipol) {
+                    rho += std::norm(w_[iw__][ipol][i]);
+                }
+                const double df[3] = {df1, df2, df3};
+                std::array<double, 3> dr;
+                for (int x = 0; x < 3; ++x) {
+                    dr[x] = df[0] * a_[0][x] + df[1] * a_[1][x] + df[2] * a_[2][x];
+                }
+                for (int x = 0; x < 3; ++x) {
+                    dr1[x] += rho * dr[x];
+                }
+                r2 += rho * (dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]);
             }
         }
     }
     norm__   = n * dV;
     spread__ = r2 / n;
+    std::array<double, 3> f0_cart{0., 0., 0.};
     for (int x = 0; x < 3; ++x) {
-        centre__[x] = r1[x] / n;
-        spread__ -= centre__[x] * centre__[x];
-        centre__[x] *= bohr_to_angstrom;
+        f0_cart[x] = f0[0] * a_[0][x] + f0[1] * a_[1][x] + f0[2] * a_[2][x];
+    }
+    for (int x = 0; x < 3; ++x) {
+        const double dr_mean = dr1[x] / n;
+        spread__ -= dr_mean * dr_mean;
+        centre__[x] = (f0_cart[x] + dr_mean) * bohr_to_angstrom;
     }
     spread__ *= bohr_to_angstrom * bohr_to_angstrom;
 }

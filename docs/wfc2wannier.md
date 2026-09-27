@@ -58,7 +58,7 @@ non-zero rows of `u_dis.mat`.
 |---|---|
 | `wfc<ik>.dat` | Bloch functions in the Wannier gauge, same format as QE (`nbnd` = `num_wann`), `ik` = k index of `u.mat`. Readable with the same reader (`QEWavefunction::read`) or any QE-aware tool |
 | `wannier_<n>.xsf` | $w_n(\mathbf r)$ on the supercell (real part, bohr$^{-3/2}$; $\sqrt{\lvert w_\uparrow\rvert^2+\lvert w_\downarrow\rvert^2}$ for spinors), atoms from `data-file-schema.xml` |
-| `wannier_centres.txt` | norm, centre and spread of each $w_n$ computed on the real-space grid |
+| `wannier_centres.txt` | norm, centre and spread of each $w_n$ computed on the real-space grid, minimum-image wrapped on the Born-von Kármán supercell (`mp_grid` of `seedname.win`) so the result does not depend on how much of it `supercell` samples |
 
 The standard output also reports $\max\lvert V^\dagger V-1\rvert$ and the orthonormality of the rotated Bloch functions.
 
@@ -68,7 +68,12 @@ The standard output also reports $\max\lvert V^\dagger V-1\rvert$ and the orthon
   so $w_n$ is normalized to 1 on the Born–von Kármán supercell.
 * Ultrasoft/PAW pseudopotentials: only the smooth part of the wavefunctions is stored, orthonormal with the $S$ matrix.
   $\langle\tilde\psi_n|\tilde\psi_m\rangle\neq\delta_{nm}$ and the norm of $w_n$ is not 1 (the same happens in `wannier_plot`).
-* Centres and spreads from the grid are approximate (grid spacing, finite supercell); the reference values are those in `seedname.wout`.
+* Centres and spreads from the grid are approximate (grid spacing, finite `supercell` truncating $w_n$'s tails if it is smaller
+  than `mp_grid`); the reference values are those in `seedname.wout`. The moments are computed with the minimum-image
+  displacement on the `mp_grid` supercell (a periodic/"circular" mean first locates the centre, then displacements are folded
+  modulo `mp_grid` before the second moment), so `supercell = mp_grid` (sampling the whole Born-von Kármán cell, where $w_n(\mathbf r)$
+  is exactly periodic) gives a well-defined answer rather than an inflated spread from counting a wrapped-around tail at its
+  unwrapped, far-away position.
 * `gamma_only` files are expanded to the full G sphere; noncollinear (`npol = 2`) is supported.
 
 ## HDF5 input
