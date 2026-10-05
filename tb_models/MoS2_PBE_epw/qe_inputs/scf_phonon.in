@@ -1,0 +1,28 @@
+&control
+  calculation = 'scf'
+  prefix      = 'mos2'
+  outdir      = './'
+  pseudo_dir  = '/home/giovanni/codes/q-e-EPW-6.1/pseudo'
+  tprnfor     = .true.
+/
+&system
+  ibrav       = 4
+  celldm(1)   = 6.016888
+  celldm(3)   = 6.281407
+  nat         = 3
+  ntyp        = 2
+  ecutwfc     = 80
+  assume_isolated = '2D'
+/
+&electrons
+  conv_thr    = 1.0d-12
+/
+ATOMIC_SPECIES
+  Mo  95.95   Mo-PBE.upf
+  S   32.06   S-PBE.upf
+ATOMIC_POSITIONS crystal
+Mo               0.3333333333        0.6666666667        0.0000000000   
+S                0.6666666667        0.3333333333        0.0781831467    
+S                0.6666666667        0.3333333333       -0.0781831467    
+K_POINTS automatic
+  12 12 1 0 0 0

@@ -102,6 +102,15 @@ if [ -f Output/Lattice.txt ]; then
     python3 "${PROJECT_ROOT}/ci-test/check_phonons.py" "${INPUT}" Output || num_failures=$((num_failures+1))
 fi
 
+# ─────────────────────────────────────────────
+# Checks of a single test (e.g. symmetry of the coherent phonons): ci-test/checks/<test name>.sh,
+# run in the output directory with the input as argument
+# ─────────────────────────────────────────────
+CHECK="${PROJECT_ROOT}/ci-test/checks/${SEEDNAME}.sh"
+if [ -f "${CHECK}" ]; then
+    PROJECT_ROOT="${PROJECT_ROOT}" bash "${CHECK}" "${INPUT}" || num_failures=$((num_failures+1))
+fi
+
 if [ ${num_failures} -ne 0 ]; then
     echo "${num_failures} comparison(s) failed for ${SEEDNAME}"
     exit 1

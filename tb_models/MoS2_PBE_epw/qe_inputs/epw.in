@@ -1,0 +1,47 @@
+&INPUTEPW
+  prefix      = 'mos2'
+  outdir      = './'
+  dvscf_dir   = '../02_phonon/save'
+
+  elph        = .true.
+  epbwrite    = .false.
+  epbread     = .false.
+  epwwrite    = .true.
+  epwread     = .false.
+  lpolar      = .false.
+
+  wannierize  = .true.
+  nbndsub     = 11
+  bands_skipped = 'exclude_bands = 1:6'
+  num_iter    = 500
+  proj(1)     = 'Mo:d'
+  proj(2)     = 'S:p'
+  dis_win_min  = -13.9386
+  dis_win_max  = 1.0614
+  dis_froz_min = -13.9386
+  dis_froz_max = -3.4386
+  wdata(1)    = 'write_tb = .true.'
+  wdata(2)    = 'write_hr = .true.'
+  wdata(3)    = 'dis_num_iter = 2000'
+  wdata(4)    = 'conv_tol = 1E-12'
+  wdata(5)    = 'conv_window = 4'
+  wdata(6)    = 'bands_plot = .true.'
+  wdata(7)    = 'begin kpoint_path'
+  wdata(8)    = 'G 0.0 0.0 0.0 M 0.5 0.0 0.0'
+  wdata(9)    = 'M 0.5 0.0 0.0 K 0.333333333333 0.333333333333 0.0'
+  wdata(10)   = 'K 0.333333333333 0.333333333333 0.0 G 0.0 0.0 0.0'
+  wdata(11)   = 'end kpoint_path'
+
+  nk1 = 12
+  nk2 = 12
+  nk3 = 1
+  nq1 = 1
+  nq2 = 1
+  nq3 = 1
+  nkf1 = 1
+  nkf2 = 1
+  nkf3 = 1
+  nqf1 = 1
+  nqf2 = 1
+  nqf3 = 1
+/

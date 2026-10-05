@@ -324,7 +324,12 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
 
   (f = 0.1: mean displacement −0.07, small non-linear corrections.) In an insulator $\Pi(\omega)-\Pi(0)<0$: `static`
   softens the phonon by $\sim(\omega/{\rm gap})^2$, as seen on the synthetic hBN (1369.957 against 1370). On the real hBN
-  it gives 1349.59 against 1349.53 of ph.x, a hardening of $4\cdot10^{-5}$: to be checked (fit accuracy or sum rule).
+  it gives 1349.59 against 1349.53 of ph.x, a hardening of $4\cdot10^{-5}$. On MoS2 from EPW the same hardening is
+  large and depends on the amplitude: A1' at $u_0$ = 0.005 Å per S is 2.7 % above ph.x, and
+  $\omega/\omega_{\rm ph.x}-1 = -2.0\cdot10^{-3} + 1.15\cdot10^{3}\,u_0^2$ ($u_0$ in Å, from 0.0002 to 0.005 Å; the same with
+  dt = 0.02 and 0.04 fs). The linear limit is the non-adiabatic softening; the $u_0^2$ term is the anharmonicity of the
+  electronic energy of the model, amplified because for A1' $\Pi = -6.6\,K^{\rm BO}$ (the bare $K^0$ alone gives
+  1092 cm⁻¹). With `dynamic` the frequency is exact at any amplitude. Use small displacements to check the static limit.
 
   Not included: the second-order coupling $\frac12 u_\mu u_\nu\,\mathrm{Tr}[\partial^2H/\partial u_\mu\partial u_\nu\,(\rho-\rho_0)]$
   (Debye–Waller-like), which also changes the frequency with excited carriers; the ions are classical at q = Γ
@@ -343,6 +348,12 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
   conserved) and `hBN_HSEX_phonons` (laser + mean field, dynamic reference, energy balance). The synthetic coupling has
   $\sum_\kappa g_\kappa = 0$ by construction (it depends only on bond lengths), so it does not test step 3 of section 3.3;
   the QE → EPW → EDUS run on hBN of section 4 does.
+  Real EPW data: `tb_models/MoS2_PBE_epw` (monolayer MoS2, PBE, 11 Wannier functions, see its README) for
+  `MoS2_epw_phonons_dynamic` (A1' displaced, no laser, dynamic reference: frequency of ph.x within 1e-8) and
+  `MoS2_epw_phonons_linear`/`_circular` (pump at 3 eV, static reference). `ci-test/check_symmetry.py` (run from
+  `ci-test/checks/<test>.sh`) classifies the modes by their parity under $\sigma_h$ and checks D3h: the odd modes
+  E'' and A2'' stay at the noise (~1e-10 of A1'), A1' (DECP) is the most excited mode, and with the circular pump
+  $E(E')/E(A1') \approx 2\cdot10^{-5}$ against 0.14 with the linear one.
 
 Still to do: q ≠ 0 (section 7), Born effective charges
 (direct IR driving, section 8), gpu, the Magnus time stepper with the lattice, the dynamical matrix in xml format.

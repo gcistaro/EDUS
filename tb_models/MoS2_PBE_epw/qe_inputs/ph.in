@@ -1,0 +1,9 @@
+phonons of monolayer MoS2 at Gamma
+&inputph
+  prefix   = 'mos2'
+  outdir   = './'
+  fildyn   = 'mos2.dyn1'
+  fildvscf = 'dvscf'
+  tr2_ph   = 1.0d-17
+/
+0.0 0.0 0.0

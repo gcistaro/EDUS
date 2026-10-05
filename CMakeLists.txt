@@ -378,6 +378,13 @@ add_test(NAME hBN_phonons_static      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/s
 add_test(NAME hBN_HSEX_phonons_static COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_static 2)
 add_test(NAME hBN_HSEX_phonons        COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons        2)
 add_test(NAME hBN_HSEX_phonons_screened COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_screened 2)
+# Ehrenfest dynamics with the real output of QE/EPW for monolayer MoS2 (tb_models/MoS2_PBE_epw: PBE, 11 Wannier
+# functions Mo d + S p, coupling at q = 0, 6x6 grid): A1' displaced without laser with the dynamic reference (the
+# frequency of ph.x), and the coherent phonons of a pump at 3 eV, linear and circular, with the symmetry of D3h
+# (ci-test/checks: E'' and A2'' at rest, A1' dominant, E' only with the linear polarization)
+add_test(NAME MoS2_epw_phonons_dynamic  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh MoS2_epw_phonons_dynamic  2)
+add_test(NAME MoS2_epw_phonons_linear   COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh MoS2_epw_phonons_linear   2)
+add_test(NAME MoS2_epw_phonons_circular COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh MoS2_epw_phonons_circular 2)
 ############
 ############add_test(NAME MPI_hBN COMMAND
 ############          bash -c "mkdir ${CMAKE_SOURCE_DIR}/CTEST; 
