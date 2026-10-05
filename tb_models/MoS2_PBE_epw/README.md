@@ -16,7 +16,7 @@ S 3s), total spread 18.6 A^2, 7 filled bands. Disentanglement windows relative t
 outer up to VBM + 7 eV.
 
 Checks: Wannier bands on the DFT bands of G-M-K-G within 6 meV in the frozen window (1 meV for the valence), gap
-1.671 eV (direct at K, as DFT); `max|H_EPW - H_tb|` = 6e-8 eV in the recap of EDUS. ph.x at Gamma (cm^-1): E'' 276.6,
+1.671 eV (indirect Gamma -> K: the PBE valence top at Gamma is 11 meV above K, the direct gap at K is 1.682 eV, as in DFT); `max|H_EPW - H_tb|` = 6e-8 eV in the recap of EDUS. ph.x at Gamma (cm^-1): E'' 276.6,
 E' 373.7, A1' 396.7, A2'' 458.7, acoustic below 3.1.
 
 Note on the static adiabatic reference: for A1' the electrons of the model give Pi = -6.6 K_BO (frequency of
