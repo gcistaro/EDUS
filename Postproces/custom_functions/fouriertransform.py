@@ -21,7 +21,9 @@ def FourierTransform(t_au, Jt_au, smearing_eV):
     length_fft = int( Total_T_s_wanted/Delta_t_s )
     # The zero padding needed for the wanted resolution scales as 1/dt: with a very fine
     # time grid it explodes (tens of millions of points), so cap it. Never truncate the signal.
-    max_length_fft = 2**20
+    # The cap is above the ~4.1e6 points of the finest grid of the tests (LiF_HSEX, dt = 0.001 fs), whose
+    # reference spectra are computed without it
+    max_length_fft = 2**23
     if length_fft > max_length_fft:
         print("FourierTransform: zero padding capped to", max_length_fft, "points (wanted", length_fft, ")")
     length_fft = max(len(t_au), min(length_fft, max_length_fft))

@@ -222,3 +222,24 @@ jobs:
         run: |
           cd build
           ctest -R "^hBN_HSEX_phonons_screened$" --output-on-failure
+
+      - name: Run MoS2_epw_phonons_dynamic test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^MoS2_epw_phonons_dynamic$" --output-on-failure
+
+      - name: Run MoS2_epw_phonons_linear test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^MoS2_epw_phonons_linear$" --output-on-failure
+
+      - name: Run MoS2_epw_phonons_circular test
+        env:
+          MPIEXEC_FLAGS: --oversubscribe
+        run: |
+          cd build
+          ctest -R "^MoS2_epw_phonons_circular$" --output-on-failure
