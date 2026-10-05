@@ -76,6 +76,11 @@ compose_json(nlohmann::json const& schema__, nlohmann::json const& in__, nlohman
                               nlohmann::json(), inout__[key]); 
              }
         }
+        /* object with its own parameters, e.g. phonons */
+        else if (it.value().contains("type") && it.value()["type"] == "object" && it.value().contains("properties")) {
+            compose_json(it.value()["properties"], in__.contains(key) ? in__[key] : nlohmann::json::object(),
+                         inout__[key]);
+        }
         else if (it.value().contains("type") && it.value()["type"] != "object") {
             if (in__.contains(key)) {
                 /* copy the new input */

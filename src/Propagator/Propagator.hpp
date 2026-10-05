@@ -8,6 +8,7 @@
 #include "Electrons/System.hpp"
 #include "Electrons/State.hpp"
 #include "MeanField/MeanField.hpp"
+#include "Phonons/Lattice.hpp"
 #include "Propagator/PropagatorParameters.hpp"
 
 /// @brief Time propagation of the electronic density matrix. It defines the equation of motion
@@ -15,7 +16,9 @@
 /// \frac{\partial \rho}{\partial t} = -i [H_0 + H_{\text{eff}} + \boldsymbol{\varepsilon}(t)\cdot \Xi, \rho] +
 /// \boldsymbol{\varepsilon}(t)\nabla_\textbf{k} \rho
 /// @f]
-/// and advances it in time with DESolver. The class does not own the physical objects:
+/// and advances it in time with DESolver. With phonons (Ehrenfest dynamics) the Hamiltonian gets the term
+/// @f$ \sum_\mu u_\mu g_\mu @f$ and the coordinates of the lattice are propagated together with the density matrix
+/// (see phonon::Lattice). The class does not own the physical objects:
 /// it only keeps pointers to them, so they must outlive the Propagator.
 class Propagator : public CommutatorEquation
 {
@@ -29,6 +32,12 @@ class Propagator : public CommutatorEquation
         electron::MeanField* meanfield_ = nullptr;
         /// Lasers; not const because the vector potential is integrated in time
         SetOfLaser* lasers_ = nullptr;
+        /// Lattice coupled to the electrons; nullptr without phonons
+        const phonon::Lattice* lattice_ = nullptr;
+        /// Force of the electrons on the lattice, computed with the last Hamiltonian
+        std::vector<double> force_;
+        /// Density matrix with respect to which the force is computed: rho0, or rho_BO in the dynamic reference
+        const Operator<std::complex<double>>* reference_ = nullptr;
         /// Gradient in k, shared with System (used for the velocity)
         const kGradient* kgradient_ = nullptr;
         /// R grid centered in Gamma, used for the Peierls phase
@@ -38,6 +47,10 @@ class Propagator : public CommutatorEquation
 
         /// Driver for the time propagation, it defines how we solve the differential equations
         DESolver<Operator<std::complex<double>>> desolver_;
+        /// Driver for the time propagation of density matrix and lattice together (with phonons)
+        DESolver<EhrenfestState> desolver_ehrenfest_;
+        /// Equation of motion of density matrix and lattice, given to desolver_ehrenfest_
+        std::unique_ptr<EquationOfMotion<EhrenfestState>> ehrenfest_equation_;
         /// Space where we calculate the commutator @f$ [H, \rho] @f$
         Space propagation_space_ = k;
         /// Space where we evaluate H=H0+E \cdot r
@@ -56,8 +69,19 @@ class Propagator : public CommutatorEquation
         /// Stops if the time step is too large for the stability of the time stepper
         void check_stability();
         /// H_ of the state at time__ for the density matrix DM__ (with its R component up to date), in R:
-        /// H0 + E.r + Sigma, with the Peierls phase if needed
-        void build_hamiltonian(const double& time__, const Operator<std::complex<double>>& DM__);
+        /// H0 + E.r + Sigma (+ sum_mu u_mu g_mu if lattice__ is given, also computing force_), with the Peierls
+        /// phase if needed
+        /// Without the field (with_field__ = false, for rho_BO) there are no laser, gradient term and Peierls phase,
+        /// and the force is not computed.
+        void build_hamiltonian(const double& time__, const Operator<std::complex<double>>& DM__,
+                               const phonon::Coordinates* lattice__ = nullptr, const bool with_field__ = true);
+        /// Time derivative of the density matrix, with the lattice at the coordinates lattice__ (if not nullptr),
+        /// with or without the field
+        void derivative_electrons(Operator<std::complex<double>>& Output__, const double& time__,
+                                  const Operator<std::complex<double>>& Input__, const phonon::Coordinates* lattice__,
+                                  const bool with_field__);
+        std::string stepper_name() const;
+        double stepper_stability_limit() const;
 
     public:
         Propagator() = default;
@@ -68,6 +92,8 @@ class Propagator : public CommutatorEquation
         /// Right hand side of the equation of motion, for DESolver
         void derivative(Operator<std::complex<double>>& Output__, const double& time__,
                         const Operator<std::complex<double>>& Input__) override;
+        /// Right hand side of the equations of motion of density matrix and lattice (Ehrenfest dynamics)
+        void derivative(EhrenfestState& Output__, const double& time__, const EhrenfestState& Input__);
         /// Hamiltonian of the commutator form (k component), for the Magnus time stepper
         void hamiltonian(Operator<std::complex<double>>& H__, const double& time__,
                          const Operator<std::complex<double>>& DM__) override;
@@ -82,13 +108,14 @@ class Propagator : public CommutatorEquation
                         electron::State& state__,
                         electron::MeanField& meanfield__,
                         SetOfLaser& lasers__,
-                        const kGradient& kgradient__);
+                        const kGradient& kgradient__,
+                        const phonon::Lattice* lattice__ = nullptr);
 
         /// Advances the density matrix of one time step
         void step();
 
         /// Sets the hamiltonian of the state to H0 + E(t) \cdot r (independent particles)
-        void ipa_hamiltonian(const double& time__);
+        void ipa_hamiltonian(const double& time__, const bool with_field__ = true);
         /// Multiplies O__(R) by exp(i*sign*A(t) \cdot R)
         void apply_peierls_phase(Operator<std::complex<double>>& O__, const double& time__, const int sign,
                                  const Processor& proc__=host);
@@ -99,8 +126,10 @@ class Propagator : public CommutatorEquation
         /* getter methods */
         const PropagatorParameters& parameters() const { return parameters_; }
         const kGradient& kgradient() const { return *kgradient_; }
-        double current_time() const { return desolver_.current_time(); }
-        double time_step() const { return desolver_.time_step(); }
+        double current_time() const { return lattice_ ? desolver_ehrenfest_.current_time() : desolver_.current_time(); }
+        double time_step() const { return parameters_.desolver.dt; }
+        /// Lattice coupled to the electrons, nullptr without phonons
+        const phonon::Lattice* lattice() const { return lattice_; }
         Processor processor() const { return processor_; }
 };
 

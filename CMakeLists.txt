@@ -130,6 +130,9 @@ set(_SOURCES src/initialize.cpp
              src/Electrons/Pdos.cpp
              src/Propagator/Propagator.cpp
              src/Output/OutputManager.cpp
+             src/Phonons/EPW.cpp
+             src/Phonons/DynamicalMatrix.cpp
+             src/Phonons/Lattice.cpp
              src/GridStructure/GridStructure.cpp
     )
 
@@ -366,6 +369,15 @@ add_test(NAME MoS2_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME hBN_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX 4)
 add_test(NAME LiF_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX 4)
 set_tests_properties(hBN_HSEX_np4 LiF_HSEX_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+# Ehrenfest dynamics of the lattice with synthetic electron-phonon data in the format of EPW
+# (tb_models/hBN_synthetic_epw, from utility/make_synthetic_epw.py): static limit without laser with the
+# static adiabatic reference (IPA and HSEX: the static response of the electrons must give back the frequency of
+# ph.x), coherent phonons driven by the laser with the mean field and the dynamic adiabatic reference, and the
+# unscreening of the coupling (coupling = screened) with the static reference
+add_test(NAME hBN_phonons_static      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_phonons_static      2)
+add_test(NAME hBN_HSEX_phonons_static COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_static 2)
+add_test(NAME hBN_HSEX_phonons        COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons        2)
+add_test(NAME hBN_HSEX_phonons_screened COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_screened 2)
 ############
 ############add_test(NAME MPI_hBN COMMAND
 ############          bash -c "mkdir ${CMAKE_SOURCE_DIR}/CTEST; 

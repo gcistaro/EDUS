@@ -26,6 +26,7 @@ where $H_0$ is the tight-binding Hamiltonian, $\boldsymbol\xi$ the position oper
 - **Electron–electron interaction**:
   - *ab initio*: bare and screened Coulomb interactions computed with the KCW code of Quantum ESPRESSO;
   - *model*: Rytova–Keldysh (2D) or 3D Coulomb potential with a dielectric constant.
+- **Coherent phonons**: lattice at Γ coupled to the electrons at the mean-field (Ehrenfest) level, with the electron–phonon coupling of EPW and the force constants of ph.x.
 - **Lasers**: any number of sin² pulses, with intensity, frequency (or wavelength), polarization, delay and phase.
 - **Observables**: velocity (current), absorption spectra, band and Wannier populations, energy balance and work of the field, projected DOS, band structure.
 - **Performance**: MPI parallelization over k points, optional OpenMP threads and GPU (CUDA) support.
@@ -186,6 +187,7 @@ The most important ones:
 | `printresolution` | Print observables every N time steps |
 | `kpath` | Path in k space where the band structure is printed |
 | `opengap` | Scissor operator added to the gap |
+| `phonons` | Lattice coupled to the electrons (Ehrenfest dynamics) |
 
 ### Electron–electron interaction
 
@@ -220,6 +222,28 @@ This writes `BANDSTRUCTURE.txt` and `plotbands.gnu`; plot it with `gnuplot plotb
 
 EDUS then writes a `wannier_tb.dat` file with the corrected Hamiltonian, which can be used to restart the simulation.
 
+### Coherent phonons (Ehrenfest dynamics)
+
+With `"phonons": {"enabled": true, ...}` the displacements of the atoms at Γ are propagated together with the density matrix: the electrons feel $\sum_\mu u_\mu g_\mu$, with $g_\mu = \partial H/\partial u_\mu$ the electron–phonon coupling, and the atoms feel the force of $\Delta\rho$ (theory in [`src/Phonons/EHRENFEST.md`](src/Phonons/EHRENFEST.md)). The coupling is read from an EPW calculation with `epwwrite = .true.` (`epwdata.fmt`, `wigner.fmt`, `crystal.fmt`, `prefix.epmatwp`), with the same Wannier functions of `tb_file` (EDUS checks that the Hamiltonian of EPW is the one of the model); masses and force constants from the dynamical matrix at Γ of ph.x (text format):
+
+```json
+"phonons": {
+  "enabled": true,
+  "epw_directory": "./epw",
+  "dyn_file": "./ph/prefix.dyn1",
+  "damping_time": 500, "damping_time_units": "fs"
+}
+```
+
+The coupling of a standard EPW run is screened by all the electrons of DFT, while the mean field of EDUS generates again the screening of the electrons of the model: with `"coupling": "screened"` (default) this part is removed at the beginning, $g_b = g_s - \Sigma[\chi_0 g_s]$, so that in the static limit the electrons feel exactly the coupling of EPW (without the mean field nothing changes); `"bare"` uses the files as they are.
+
+Other options: `spin_degeneracy` (default 2), `coupling_scale`, `acoustic_sum_rule`, `adiabatic_reference` (the force constants of ph.x already contain the adiabatic screening of the electrons, which the propagated electrons generate again: with `"static"` or `"dynamic"` only the excited part $\rho-\rho_0-\Delta\rho_{BO}(u)$ pushes the atoms, see below) and `initial_displacement`. Only q = Γ is implemented, with the RK and AB solvers on CPU. [`utility/make_synthetic_epw.py`](utility/make_synthetic_epw.py) writes synthetic data in the format of EPW from a tight-binding model, for tests.
+
+`adiabatic_reference`:
+- `"static"` (default, recommended): the static linear response of the electrons of the model (mean field included) is computed self-consistently at the beginning and removed, i.e. the lattice uses $K-\Pi(0)$; the frequencies are those of the non-adiabatic theory, $M\omega^2 = K+\Pi(\omega)-\Pi(0)$, which in the static limit are those of ph.x;
+- `"dynamic"`: a second density matrix $\rho_{BO}$ is propagated with the same displacements and no laser, and only $\rho-\rho_{BO}$ pushes the atoms (twice the cost). $\rho_{BO}$ is the whole response to $u(t)$, so without laser the lattice oscillates exactly with the frequencies of ph.x and the non-adiabatic correction $\Pi(\omega)-\Pi(0)$ is lost (small in insulators, relevant in metals);
+- `"none"`: the whole $\rho-\rho_0$ pushes the atoms with the force constants of ph.x (the adiabatic response is counted twice; for tests only).
+
 ---
 
 ## Output
@@ -233,6 +257,7 @@ The time-dependent observables are written in the `Output/` folder:
 | `Velocity.txt` | Velocity (current) of the electrons |
 | `Energy.txt` | Band and mean-field energy, power and work of the field |
 | `Population.txt`, `Population_wannier.txt` | Populations in the band and in the Wannier basis |
+| `Lattice.txt` | With phonons: displacements, velocities and forces of the atoms, energy of the lattice |
 
 Other files: `pdos.txt` (projected DOS), `BANDSTRUCTURE.txt` (if `kpath` is given) and `output.h5` (large matrices, selected with `toprint`, when compiled with HDF5).
 

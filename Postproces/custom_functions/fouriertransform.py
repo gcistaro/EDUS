@@ -19,10 +19,15 @@ def FourierTransform(t_au, Jt_au, smearing_eV):
     Delta_freq_eV_wanted = 0.001
     Total_T_s_wanted = 1./Delta_freq_eV_wanted/constants.physical_constants["electron volt-hertz relationship"][0]
     length_fft = int( Total_T_s_wanted/Delta_t_s )
+    # The zero padding needed for the wanted resolution scales as 1/dt: with a very fine
+    # time grid it explodes (tens of millions of points), so cap it. Never truncate the signal.
+    max_length_fft = 2**20
+    if length_fft > max_length_fft:
+        print("FourierTransform: zero padding capped to", max_length_fft, "points (wanted", length_fft, ")")
+    length_fft = max(len(t_au), min(length_fft, max_length_fft))
 
     #print(Total_T_s_wanted,Delta_t_s, Total_T_s,Delta_freq_eV_wanted)
-    t_au_wanted = np.linspace(t_au[0],Total_T_s_wanted,length_fft)
-    
+
     smearing_au = smearing_eV*constants.physical_constants["electron volt-hartree relationship"][0]
 
     window = np.exp(-t_au*smearing_au)

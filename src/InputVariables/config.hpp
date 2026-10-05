@@ -462,6 +462,40 @@ class config_t
     //     nlohmann::json::json_pointer ptr("/lasers");
     //     return lasers_list_t(dict_.at(ptr));
     // }
+    /// Lattice coupled to the electrons (Ehrenfest dynamics)
+    class phonons_t {
+    private:
+        nlohmann::json& dict_;
+
+    public:
+        phonons_t(nlohmann::json& dict__)
+            : dict_(dict__)
+        {
+        }
+        bool enabled() const { return dict_.at("enabled").get<bool>(); }
+        std::string epw_directory() const { return dict_.at("epw_directory").get<std::string>(); }
+        std::string epmatwp() const { return dict_.at("epmatwp").get<std::string>(); }
+        std::string dyn_file() const { return dict_.at("dyn_file").get<std::string>(); }
+        std::vector<std::vector<double>> qpoints() const { return dict_.at("qpoints").get<std::vector<std::vector<double>>>(); }
+        double spin_degeneracy() const { return dict_.at("spin_degeneracy").get<double>(); }
+        double damping_time() const { return dict_.at("damping_time").get<double>(); }
+        void damping_time(double damping_time__) { dict_["damping_time"] = damping_time__; }
+        std::string damping_time_units() const { return dict_.at("damping_time_units").get<std::string>(); }
+        void damping_time_units(std::string units__) { dict_["damping_time_units"] = units__; }
+        double coupling_scale() const { return dict_.at("coupling_scale").get<double>(); }
+        std::string coupling() const { return dict_.at("coupling").get<std::string>(); }
+        bool acoustic_sum_rule() const { return dict_.at("acoustic_sum_rule").get<bool>(); }
+        std::string adiabatic_reference() const { return dict_.at("adiabatic_reference").get<std::string>(); }
+        std::vector<double> initial_displacement() const { return dict_.at("initial_displacement").get<std::vector<double>>(); }
+        void initial_displacement(std::vector<double> displacement__) { dict_["initial_displacement"] = displacement__; }
+        std::string initial_displacement_units() const { return dict_.at("initial_displacement_units").get<std::string>(); }
+        void initial_displacement_units(std::string units__) { dict_["initial_displacement_units"] = units__; }
+    };
+    phonons_t phonons() const
+    {
+        /* the accessors of phonons_t that change the dictionary are used only on a non-const config_t */
+        return phonons_t(const_cast<nlohmann::json&>(dict_.at("/phonons"_json_pointer)));
+    }
 private:
 protected:
     nlohmann::json dict_;

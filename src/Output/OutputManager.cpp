@@ -54,13 +54,49 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         os_time_.open(path("Time.txt"));
         os_velocity_.open(path("Velocity.txt"));
         os_energy_.open(path("Energy.txt"));
+        auto* lattice = propagator_->lattice();
         os_energy_ << "# Energy balance of the electrons, Hartree per unit cell (one spin channel)\n"
-                   << "# E_band = Tr[H0 (rho-rho0)], E_MF = 1/2 Tr[Sigma[rho-rho0] (rho-rho0)], E = E_band + E_MF\n"
+                   << "# E_band = Tr[H0 (rho-rho0)], E_MF = 1/2 Tr[Sigma[rho-rho0] (rho-rho0)], E = E_band + E_MF"
+                   << (lattice ? " + E_ph\n# E_ph = (E_lattice + E_coupling)/s: lattice and coupling (see Lattice.txt), divided by the spin degeneracy s\n" : "\n")
                    << "# (changes with respect to equilibrium, computed from rho-rho0 to keep all the digits)\n"
                    << "# W = work of the field = -int E(t).v(t) dt, v = <grad_k(H0+Sigma) + i[H0+Sigma, r]>\n"
                    << "# P = -E.v is the power; W is integrated with the trapezoidal rule (error O(dt^2))\n"
                    << "# Without decay, E(t) - E(0) = W(t) up to the error of the time integration of W\n"
                    << "#        time (a.u.)       E_band-E_band(0)                  E_MF              E - E(0)                     P                     W          E - E(0) - W\n";
+        if( lattice ) {
+            int nmodes = lattice->num_modes();
+            os_lattice_.open(path("Lattice.txt"));
+            bool dynamic = lattice->dynamic_reference();
+            os_lattice_ << "# Lattice at q = 0, atomic units, per unit cell (all spin channels), adiabatic reference: "
+                        << phonon::to_string(lattice->parameters().adiabatic_reference) << "\n"
+                        << "# mu = 3*atom + direction (cartesian), u = displacement (bohr), du/dt (bohr/a.u.),\n"
+                        << "# F = force of the electrons used in the dynamics, s/N sum_k Tr[g_mu (rho - " << (dynamic ? "rho_BO" : "rho0")
+                        << ")] (Ha/bohr): the atoms feel -F\n"
+                        << "# E_lattice = kinetic + harmonic energy (force constants used in the dynamics)\n"
+                        << (dynamic ? "# E_coupling = u.F[rho - rho0] - E[rho_BO], E[rho_BO] = energy of rho_BO including its coupling\n"
+                                    : "# E_coupling = u.F\n")
+                        << "# columns: time, E_lattice, E_coupling, u_mu (" << nmodes << "), du_mu/dt (" << nmodes << "), F_mu ("
+                        << nmodes << ")\n";
+
+            os_modes_.open(path("Phonon_modes.txt"));
+            os_modes_ << "# Lattice at q = 0 in the normal modes lambda of the dynamical matrix of ph.x, atomic units per unit cell\n"
+                      << "# Q = sum_mu e(mu,lambda) sqrt(M_mu) u_mu (bohr sqrt(m_e)), dQ/dt, F = sum_mu e(mu,lambda) F_mu/sqrt(M_mu)\n"
+                      << "# (F_mu of Lattice.txt: Q'' = -omega^2 Q - F), E = 1/2 dQ^2 + 1/2 omega^2 Q^2 (Ha),\n"
+                      << "# N = E/omega = |<b>|^2, number of phonons of the coherent (classical) lattice (0 for |omega| < 1 cm^-1)\n"
+                      << "# In a degenerate subspace only the sum over the modes is meaningful\n"
+                      << "# modes: lambda, frequency (cm^-1), eigenvector e(mu, lambda) for mu = 3*atom + direction\n";
+            for( int lambda = 0; lambda < nmodes; ++lambda ) {
+                os_modes_ << "# " << std::setw(4) << lambda << std::setw(14) << std::setprecision(6) << std::fixed
+                          << lattice->mode_frequency(lambda) * 219474.6313705;
+                for( int mu = 0; mu < nmodes; ++mu ) {
+                    os_modes_ << std::setw(11) << std::setprecision(6) << lattice->mode_vector(mu, lambda);
+                }
+                os_modes_ << "\n";
+            }
+            os_modes_ << std::defaultfloat
+                      << "# columns: time, Q (" << nmodes << "), dQ/dt (" << nmodes << "), F (" << nmodes << "), E ("
+                      << nmodes << "), N (" << nmodes << ")\n";
+        }
     }
 
 #ifdef EDUS_HDF5
@@ -240,8 +276,9 @@ void OutputManager::print_velocity_energy(const double& time__)
     auto& rho0 = system_->DM0().get_Operator(Space::k);
 
     /* local sums: 0-2 H0 part of the velocity (operator of System, already divided by the cell volume),
-       3-5 Sigma part of the velocity (not divided), 6 Tr[H0 (rho-rho0)], 7 Tr[Sigma (rho-rho0)] */
-    std::array<std::complex<double>, 8> local;
+       3-5 Sigma part of the velocity (not divided), 6 Tr[H0 (rho-rho0)], 7 Tr[Sigma (rho-rho0)],
+       8-9 the same two for rho_BO (dynamic adiabatic reference) */
+    std::array<std::complex<double>, 10> local;
     local.fill(0.);
     for (auto ix : { 0, 1, 2 }) {
         temp_.fill(0.);
@@ -254,12 +291,33 @@ void OutputManager::print_velocity_energy(const double& time__)
     }
     local[6] = trace_product_difference(system_->H0().get_Operator(Space::k), rho, rho0);
 
-    if( meanfield_->parameters().enabled ) {
-        /* self energy Sigma[rho-rho0], computed in R like in the propagation */
+    /* forces on the lattice: of rho - rho0 (force_full), of rho_BO - rho0 and of rho - rho_BO (dynamic reference) */
+    auto* lattice = propagator_->lattice();
+    const bool dynamic = lattice && lattice->dynamic_reference();
+    std::vector<double> force_full, force_bo, force_excited;
+    if( lattice ) {
+        aux.go_to_R();
+        force_full = lattice->force(aux, system_->DM0());
+    }
+    if( dynamic ) {
+        auto& rho_bo = state_->variables().rho_bo;
+        rho_bo.lock_space(Space::k);
+        rho_bo.go_to_R();
+        force_bo = lattice->force(rho_bo, system_->DM0());
+        force_excited = lattice->force(aux, rho_bo);
+        local[8] = trace_product_difference(system_->H0().get_Operator(Space::k), rho_bo.get_Operator(Space::k), rho0);
+    }
+    if( meanfield_->parameters().enabled || lattice ) {
+        /* self energy Sigma[rho-rho0] + sum_mu u_mu g_mu, computed in R like in the propagation */
         sigma_.get_Operator(R).fill(0.);
         sigma_.lock_space(R);
         aux.go_to_R();
-        meanfield_->self_energy(sigma_, aux, system_->DM0());
+        if( meanfield_->parameters().enabled ) {
+            meanfield_->self_energy(sigma_, aux, system_->DM0());
+        }
+        if( lattice ) {
+            lattice->add_coupling(sigma_, state_->lattice());
+        }
         sigma_.go_to_k();
         auto& sigma_k = sigma_.get_Operator(Space::k);
         local[7] = trace_product_difference(sigma_k, rho, rho0);
@@ -281,6 +339,19 @@ void OutputManager::print_velocity_energy(const double& time__)
             grad_sigma_.go_to_k();
             local[3 + ix] += trace_product(grad_sigma_.get_Operator(Space::k), rho);
         }
+    }
+    /* mean-field energy of rho_BO */
+    if( dynamic && meanfield_->parameters().enabled ) {
+        auto& rho_bo = state_->variables().rho_bo;
+        sigma_.get_Operator(R).fill(0.);
+        sigma_.lock_space(R);
+        meanfield_->self_energy(sigma_, rho_bo, system_->DM0());
+        sigma_.go_to_k();
+        local[9] = trace_product_difference(sigma_.get_Operator(Space::k), rho_bo.get_Operator(Space::k), rho0);
+    }
+    if( dynamic ) {
+        /* the propagation aligns the R component again from k */
+        state_->variables().rho_bo.lock_space(Space::k);
     }
 #ifdef EDUS_MPI
     auto& comm = decomposition_->kpool_comm();
@@ -312,6 +383,60 @@ void OutputManager::print_velocity_energy(const double& time__)
     double energy_band = local[6].real() / num_k;
     double energy_mf = 0.5 * local[7].real() / num_k;
     double energy = energy_band + energy_mf;
+    if( lattice ) {
+        /* Energy balance with the lattice. The total energy per unit cell (all spin channels) is
+               s E_electrons + u.F + E_lattice,     E_electrons = E_band + E_MF  (one spin channel, as in Energy.txt)
+           where u.F = s/N sum_k Tr[u.g (rho - rho0)] is the energy of the coupling. Energy.txt is per spin channel,
+           so the lattice terms are divided by s: E = E_band + E_MF + (E_lattice + E_coupling)/s.
+           sigma_ was built as Sigma + u.g (for the velocity), so local[7] = Tr[(Sigma + u.g)(rho - rho0)] contains
+           also Tr[u.g (rho - rho0)] = N u.F/s: it is removed from E_MF here */
+        auto& x = state_->lattice();
+        double s = lattice->parameters().spin_degeneracy;
+        auto dot_u = [&](const std::vector<double>& F__) {
+            double sum = 0.;
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                sum += x.displacement(0, mu).real() * F__[mu];
+            }
+            return sum;
+        };
+        double coupling = dot_u(force_full);
+        energy_mf -= 0.5 * coupling / s;
+        /* dynamic reference: the lattice is pushed by rho - rho_BO with K_BO, and the conserved energy is
+           E[rho] - E[rho_BO] + E_lattice, with the energy of rho_BO
+           E[rho_BO] = s (Tr[H0 (rho_BO-rho0)] + 1/2 Tr[Sigma (rho_BO-rho0)])/N + u.F[rho_BO].
+           It is included in E_coupling: E_coupling = u.F[rho] - E[rho_BO] */
+        if( dynamic ) {
+            coupling -= s * (local[8].real() + 0.5 * local[9].real()) / num_k + dot_u(force_bo);
+        }
+        /* Lattice.txt has the force that pushes the atoms in the dynamics */
+        auto& force = dynamic ? force_excited : force_full;
+        double energy_lattice = lattice->energy(x);
+        energy = energy_band + energy_mf + (energy_lattice + coupling) / s;
+
+        os_lattice_ << std::setw(22) << std::setprecision(12) << time__
+                    << std::setw(22) << std::setprecision(12) << energy_lattice
+                    << std::setw(22) << std::setprecision(12) << coupling;
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            os_lattice_ << std::setw(22) << std::setprecision(12) << x.displacement(0, mu).real();
+        }
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            os_lattice_ << std::setw(22) << std::setprecision(12) << x.velocity(0, mu).real();
+        }
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            os_lattice_ << std::setw(22) << std::setprecision(12) << force[mu];
+        }
+        os_lattice_ << std::endl;
+
+        /* the same in the normal modes of ph.x */
+        auto modes = lattice->project_on_modes(x, force);
+        os_modes_ << std::setw(22) << std::setprecision(12) << time__;
+        for( auto* v : {&modes.Q, &modes.dQ, &modes.F, &modes.energy, &modes.population} ) {
+            for( auto value : *v ) {
+                os_modes_ << std::setw(22) << std::setprecision(12) << value;
+            }
+        }
+        os_modes_ << std::endl;
+    }
 
     if( first_energy_step_ ) {
         first_energy_step_ = false;

@@ -19,7 +19,7 @@ PROJECT_ROOT="${SCRIPT_DIR}/../.."
 # ─────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────
-BUILD_DIR="${PROJECT_ROOT}/build"
+BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build}"
 INPUT="${PROJECT_ROOT}/ci-test/inputs/${SEEDNAME}.json"
 REF_DIR="${PROJECT_ROOT}/ci-test/outputs/${SEEDNAME}"
 OUT_DIR="${PROJECT_ROOT}/CTEST/${SEEDNAME}_np${NP}"
@@ -93,6 +93,13 @@ if ! grep -q '"decay"' "${INPUT}"; then
 else
     # with decay the energy is not conserved: analytic check of the relaxation after the pulses
     python3 "${PROJECT_ROOT}/ci-test/check_decay.py" "${INPUT}" Output || num_failures=$((num_failures+1))
+fi
+
+# ─────────────────────────────────────────────
+# Lattice (Ehrenfest dynamics): energy conservation and static limit
+# ─────────────────────────────────────────────
+if [ -f Output/Lattice.txt ]; then
+    python3 "${PROJECT_ROOT}/ci-test/check_phonons.py" "${INPUT}" Output || num_failures=$((num_failures+1))
 fi
 
 if [ ${num_failures} -ne 0 ]; then

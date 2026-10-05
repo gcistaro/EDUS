@@ -1,0 +1,46 @@
+{
+    "tb_file": "../../tb_models/hBN_gap7.25eV_a2.5A",
+    "grid": [12,12,1],
+    "filledbands" : 1,
+
+    "coulomb": true,
+    "epsilon": 1.0,
+    "r0": [10],
+
+    "dt": 0.0125,
+    "dt_units" : "femtoseconds",
+    "printresolution": 2,
+    "printresolution_pulse": 2,
+    "initialtime" : 0,
+    "initialtime_units" : "femtoseconds",
+    "finaltime": 40,
+    "finaltime_units" : "femtoseconds",
+
+    "solver": "RK",
+    "order": 4,
+
+    "lasers":
+    [
+      {
+      "intensity": 1e11,
+      "intensity_units" : "wcm2",
+      "frequency": 8,
+      "frequency_units" : "electronvolt",
+      "polarization": [1,0,0],
+      "cycles" : 4,
+      "t0" : 0.0,
+      "t0_units" : "fs"
+      }
+    ],
+
+    "phonons":
+    {
+      "enabled": true,
+      "epw_directory": "../../tb_models/hBN_synthetic_epw",
+      "dyn_file": "../../tb_models/hBN_synthetic_epw/hbn.dyn1",
+      "coupling": "bare",
+      "adiabatic_reference": "dynamic",
+      "damping_time": 100,
+      "damping_time_units": "fs"
+    }
+  }

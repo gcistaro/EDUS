@@ -6,7 +6,7 @@ from custom_functions.read import read_observables
 from custom_functions.window import CutWindow
 from custom_functions.fouriertransform import FourierTransform
 
-import argparse, sys
+import argparse, os, sys
 
 #define arguments
 parser=argparse.ArgumentParser()
@@ -29,7 +29,7 @@ fig.suptitle('Plots of output variables')
 
 for ip,p in enumerate(Pt):
     ax[0][0].plot(t_fs, p, label=str(ip))
-ax[0][0].legend()
+ax[0][0].legend(ncol=max(1, len(Pt)//8), fontsize="xx-small")
 ax[0][0].set_ylabel("Population")
 
 ax[1][0].plot(t_fs, Et_au[0], label="$E_x$")
@@ -67,7 +67,7 @@ Ew=Ew[:,index]
 ax[1][1].plot(w_eV, np.abs(Ew[0]), label="$E_x$")
 ax[1][1].plot(w_eV, np.abs(Ew[1]), label="$E_y$")
 ax[1][1].plot(w_eV, np.abs(Ew[2]), label="$E_z$")
-ax[1][1].set_xlabel("Time (fs)")
+ax[1][1].set_xlabel("Frequency (eV)")
 ax[1][1].legend()
 
 ax[2][1].plot(w_eV, np.abs(Vw[0]), label="$V_x$")
@@ -79,5 +79,38 @@ ax[2][1].legend()
 
 
 
-plt.show()
 plt.savefig("Population.png", dpi=200)
+
+
+#phonons: the lattice in the normal modes of ph.x (only if the run has the phonons)
+modes_file = os.path.join(args.folder, "Phonon_modes.txt")
+if os.path.exists(modes_file):
+    #frequencies (cm^-1) from the header lines "# lambda frequency eigenvector..."
+    freq = []
+    with open(modes_file) as f:
+        for line in f:
+            words = line.split()
+            if line.startswith("#") and len(words) > 3 and words[1].isdigit():
+                freq.append(float(words[2]))
+    nmodes = len(freq)
+    modes = np.loadtxt(modes_file, ndmin=2)
+    tm_fs = modes[:, 0]*constants.physical_constants["atomic unit of time"][0]*1.e15
+    #columns: time, Q, dQ/dt, F, E, N (nmodes each)
+    Fm = modes[:, 1 + 2*nmodes:1 + 3*nmodes]
+    Nm = modes[:, 1 + 4*nmodes:1 + 5*nmodes]
+
+    fig2, ax2 = plt.subplots(2, 1, sharex=True)
+    fig2.suptitle('Phonons: normal modes of the dynamical matrix')
+    for l in range(nmodes):
+        label = str(l) + (" (acoustic)" if abs(freq[l]) < 1. else " (%.0f cm$^{-1}$)" % freq[l])
+        #log scale: modes that are never populated (N = 0) are only in the legend
+        ax2[0].plot(tm_fs, np.where(Nm[:, l] > 0., Nm[:, l], np.nan), label=label)
+        ax2[1].plot(tm_fs, Fm[:, l], label=str(l))
+    ax2[0].set_yscale("log")
+    ax2[0].set_ylabel("Phonon number $N_\\lambda = E_\\lambda/\\omega_\\lambda$")
+    ax2[0].legend(fontsize="x-small")
+    ax2[1].set_ylabel("Force on the mode (a.u.)")
+    ax2[1].set_xlabel("Time (fs)")
+    fig2.savefig("Phonon_modes.png", dpi=200)
+
+plt.show()

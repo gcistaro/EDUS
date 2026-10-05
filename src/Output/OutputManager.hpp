@@ -13,7 +13,7 @@
 #include "Output/OutputParameters.hpp"
 
 /// @brief Decides when to print and writes all the outputs of the time propagation:
-/// - txt files: Time, Laser, Laser_A, Population (bloch and wannier gauge), Velocity
+/// - txt files: Time, Laser, Laser_A, Population (bloch and wannier gauge), Velocity, Energy and, with phonons, Lattice
 /// - h5 file (if compiled with EDUS_HDF5): matrices selected in "toprint"
 /// Only rank 0 writes the txt files; the quantities distributed among ranks are reduced to it.
 /// The class does not own the physical objects, it only keeps pointers to them.
@@ -57,6 +57,8 @@ class OutputManager
         std::ofstream os_pop_wannier_;
         std::ofstream os_velocity_;
         std::ofstream os_energy_;
+        std::ofstream os_lattice_;
+        std::ofstream os_modes_;
 
         std::string path(const std::string& filename__) const { return parameters_.directory + "/" + filename__; }
         /// True if at time__ we print (use_sparse__=true: resolution depends on whether a laser is on)
@@ -64,7 +66,8 @@ class OutputManager
         /// Copies the density matrix in aux_DM, removing the Peierls phase if needed
         void copy_DM_to_aux(const double& time__);
         void print_population(const double& time__, const BandGauge& bandgauge__);
-        /// Velocity (with the self energy) in Velocity.txt and energy balance in Energy.txt
+        /// Velocity (with the self energy and the lattice) in Velocity.txt, energy balance in Energy.txt and
+        /// coordinates, forces and energy of the lattice in Lattice.txt
         void print_velocity_energy(const double& time__);
         void initialize_h5(nlohmann::json dict__, const GridStructure& gridstructure__);
         void write_h5(const double& time__);

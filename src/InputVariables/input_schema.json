@@ -241,6 +241,102 @@
                 }
             }
         },
+        "phonons": {
+            "type": "object",
+            "title": "Lattice coupled to the electrons at the mean-field (Ehrenfest) level, from the Wannier representation of EPW (see src/Phonons/EHRENFEST.md)",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "title": "If true, the lattice at q = Gamma is propagated together with the electrons"
+                },
+                "epw_directory": {
+                    "type": "string",
+                    "default": "./epw",
+                    "title": "Directory of the EPW calculation (epwwrite = .true.) with epwdata.fmt, wigner.fmt, crystal.fmt and prefix.epmatwp. The Wannier functions must be the ones of tb_file"
+                },
+                "epmatwp": {
+                    "type": "string",
+                    "default": "",
+                    "title": "Name of the file prefix.epmatwp in epw_directory; if empty, the only *.epmatwp file of the directory"
+                },
+                "dyn_file": {
+                    "type": "string",
+                    "default": "",
+                    "title": "Dynamical matrix of ph.x at Gamma (text format, e.g. prefix.dyn1): masses and force constants"
+                },
+                "qpoints": {
+                    "type": "array",
+                    "default": [[0.0, 0.0, 0.0]],
+                    "title": "Phonon wavevectors in crystal coordinates. Only Gamma is implemented"
+                },
+                "spin_degeneracy": {
+                    "type": "number",
+                    "default": 2.0,
+                    "title": "Spin degeneracy of the bands (2 for a model without spin, 1 with spin-orbit): the force on the atoms is summed over the spin channels"
+                },
+                "damping_time": {
+                    "type": "number",
+                    "default": 0.0,
+                    "title": "Decay time of the amplitude of the lattice oscillations (phenomenological); 0 = no damping"
+                },
+                "damping_time_units": {
+                    "type": "string",
+                    "default": "fs",
+                    "enum": [
+                        "femtoseconds",
+                        "fs",
+                        "autime"
+                    ],
+                    "title": "Units of damping_time"
+                },
+                "coupling": {
+                    "type": "string",
+                    "default": "screened",
+                    "enum": [
+                        "screened",
+                        "bare"
+                    ],
+                    "title": "Electron-phonon coupling in the files of EPW: screened = standard EPW run, the screening of the electrons of the model (generated again by the mean field) is removed at the beginning, g_b = g_s - Sigma[chi0 g_s]; bare = used as it is"
+                },
+                "coupling_scale": {
+                    "type": "number",
+                    "default": 1.0,
+                    "title": "Factor multiplying the electron-phonon coupling of EPW (0 = lattice decoupled from the electrons)"
+                },
+                "acoustic_sum_rule": {
+                    "type": "boolean",
+                    "default": true,
+                    "title": "Impose the acoustic sum rule on the force constants and remove the rigid translation from the electron-phonon coupling"
+                },
+                "adiabatic_reference": {
+                    "type": "string",
+                    "default": "static",
+                    "enum": [
+                        "none",
+                        "static",
+                        "dynamic"
+                    ],
+                    "title": "Adiabatic (Born-Oppenheimer) response of the electrons removed from the force on the atoms, since the force constants of ph.x already contain it: static (recommended) = static linear response of the electrons of the model (mean field included), computed at the beginning, i.e. force constants K - Pi(0), which keeps the non-adiabatic correction Pi(omega) - Pi(0); dynamic = density matrix propagated with the same displacements and no laser (removes also the non-adiabatic correction of the ground state); none = nothing removed (the response is counted twice)"
+                },
+                "initial_displacement": {
+                    "type": "array",
+                    "default": [],
+                    "title": "Initial displacement of the atoms, 3 cartesian components per atom (lattice at rest); empty = equilibrium"
+                },
+                "initial_displacement_units": {
+                    "type": "string",
+                    "default": "angstrom",
+                    "enum": [
+                        "angstrom",
+                        "nanometers",
+                        "nm",
+                        "aulength"
+                    ],
+                    "title": "Units of initial_displacement"
+                }
+            }
+        },
         "kpath": {
             "type":  "array",
             "title": "vertex of a path in k space where we want to print the band structure",

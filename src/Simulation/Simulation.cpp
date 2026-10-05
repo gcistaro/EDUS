@@ -59,6 +59,12 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
                            electrons_.wannier_centers(), 
                            decomposition_ );
 
+    auto phonon_parameters = phonon::PhononParametersFactory::create( ctx_->cfg() );
+    if( phonon_parameters.enabled ) {
+        output::print("-> initializing phonons");
+        lattice_.initialize( phonon_parameters, gridstructure_, decomposition_, electrons_, material, &meanfield_ );
+    }
+
     output::print("-> initializing lasers");
     setoflaser_ = LaserFactory::create( ctx_->cfg() );
 
@@ -68,7 +74,8 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
                             electrons_state_, 
                             meanfield_, 
                             setoflaser_, 
-                            kgradient_ );
+                            kgradient_,
+                            phonon_parameters.enabled ? &lattice_ : nullptr );
 
     output_.initialize( OutputParametersFactory::create( ctx_->cfg() ), 
                         ctx_->cfg().dict(), 
@@ -120,6 +127,17 @@ void Simulation::convert_input_au()
     ctx_->cfg().opengap(Convert(ctx_->cfg().opengap(), unit(ctx_->cfg().opengap_units()),
         AuEnergy));
     ctx_->cfg().opengap_units("auenergy");
+
+    /* phonons: damping time and initial displacement in a.u. */
+    auto phonons = ctx_->cfg().phonons();
+    phonons.damping_time(Convert(phonons.damping_time(), unit(phonons.damping_time_units()), AuTime));
+    phonons.damping_time_units("autime");
+    auto displacement = phonons.initial_displacement();
+    for( auto& x : displacement ) {
+        x = Convert(x, unit(phonons.initial_displacement_units()), AuLength);
+    }
+    phonons.initial_displacement(displacement);
+    phonons.initial_displacement_units("aulength");
 }
 
 /// @brief Recap of all the variables of the simulation, as read from the input json file or
@@ -133,6 +151,9 @@ void Simulation::print_recap()
     electrons_.print_recap();
     meanfield_.print_recap();
     propagator_.print_recap();
+    if( propagator_.lattice() ) {
+        lattice_.print_recap();
+    }
     output_.print_recap();
     for (int ilaser = 0; ilaser < setoflaser_.size(); ++ilaser) {
         setoflaser_[ilaser].print_info();

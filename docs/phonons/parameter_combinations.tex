@@ -1,0 +1,370 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.0cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\emergencystretch}{2em}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcolumntype{C}{>{\centering\arraybackslash}X}
+\usepackage{url}
+\def\UrlBreaks{\do\/\do\_\do\.\do-}
+\DeclareUrlCommand\file{\urlstyle{tt}}
+\newcommand{\Dr}{\Delta\rho}
+\newcommand{\gs}{g^{\rm s}}
+\newcommand{\gb}{g^{\rm b}}
+\newcommand{\gf}{g^{\rm file}}
+\newcommand{\KBO}{K^{\rm BO}}
+\newcommand{\rBO}{\rho_{\rm BO}}
+\newcommand{\inner}[2]{\langle #1,\,#2\rangle}
+\definecolor{default}{RGB}{225,238,250}
+\definecolor{anderson}{RGB}{252,232,220}
+
+\title{Phonons in EDUS: the equations solved\\ for each combination of the input parameters}
+\author{EDUS development notes, branch \texttt{ehrenfest}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\noindent Three input parameters decide what the Ehrenfest dynamics of the lattice actually solves:
+\begin{itemize}
+\item the \textbf{mean field} of the electrons (\texttt{"coulomb": true}: Hartree with RPA, Hartree + SEX with HSEX) or IPA (\texttt{"coulomb": false});
+\item \texttt{phonons/coupling}: \texttt{"screened"} (default, standard EPW run) or \texttt{"bare"};
+\item \texttt{phonons/adiabatic\_reference}: \texttt{"none"}, \texttt{"static"} (default) or \texttt{"dynamic"}.
+\end{itemize}
+The equations of motion have always the same form (section~\ref{sec:common}); the parameters only choose four
+ingredients: the coupling $g$ in the Hamiltonian and in the force, the force constants $K$, the reference density
+matrix $\rho_{\rm ref}$ of the force, and how the electronic force constants $\Pi$ are computed at the beginning.
+Section~\ref{sec:table} lists them for the nine combinations; the following sections explain what each choice means.
+The code is in \file{src/Phonons/Lattice.cpp} (\texttt{initialize}, \texttt{unscreen\_coupling},
+\texttt{static\_response}) and \file{src/Propagator/Propagator.cpp}.
+
+\section{Equations common to all the cases}\label{sec:common}
+\begin{align}
+i\,\dot\rho(k) &= \Big[\, H_0(k) + \mathbf E(t)\cdot\mathbf r + \Sigma[\rho-\rho_0] + \sum_\mu u_\mu\, g_\mu(k)\,,\ \rho(k) \Big],
+\label{eq:rho}\\
+M_\mu\,\ddot u_\mu &= -\sum_\nu K_{\mu\nu}\,u_\nu \;-\; F_\mu \;-\; \frac{2M_\mu}{\tau}\,\dot u_\mu ,
+\label{eq:lattice}\\
+F_\mu &= \inner{g_\mu}{\rho-\rho_{\rm ref}} .
+\label{eq:force}
+\end{align}
+
+\paragraph{Symbols.}
+\begin{itemize}
+\item $u_\mu$: cartesian displacement of the atoms at $\Gamma$, $\mu = 3\kappa+\alpha$; $M_\mu$ the mass of its atom;
+  $\tau$ an optional damping time.
+\item $\inner{A}{B} = \dfrac{s}{N}\sum_k \mathrm{Tr}\big[A(k)\,B(k)\big]$, with $s$ the spin degeneracy and $N$ the number
+  of $k$ points.
+\item $\Sigma[\Dr]$: self energy of the mean field (Hartree, + SEX with HSEX), linear in $\Dr$; $\Sigma = 0$ in IPA.
+\item $\gf$: the coupling read from the files of EPW (after the removal of the rigid translation if
+  \texttt{acoustic\_sum\_rule}). With \texttt{"screened"} it is the screened coupling of DFPT, $\gs$.
+\item $\chi_0$: static independent-particle response, in the Bloch gauge
+  \begin{equation}
+  [\chi_0 V]_{nm}(k) = \frac{f_n-f_m}{\varepsilon_n(k)-\varepsilon_m(k)}\,V_{nm}(k),
+  \end{equation}
+  zero for pairs with the same occupation and for degenerate pairs.
+\item $\KBO$: the force constants of ph.x (Born--Oppenheimer, they contain the static screening of the electrons).
+\item $\Pi_{\mu\nu} = \inner{g_\mu}{\delta\rho_\nu}$: electronic force constants, with $\delta\rho_\nu$ the static
+  response of the electrons of the model to a unit displacement $u_\nu$.
+\item $\rBO$: a second density matrix, propagated with the same $u(t)$, with the mean field and without the laser
+  (only with \texttt{"dynamic"}):
+  \begin{equation}
+  i\,\dot\rho_{\rm BO}(k) = \Big[\, H_0(k) + \Sigma[\rBO-\rho_0] + \sum_\mu u_\mu\, g_\mu(k)\,,\ \rBO(k) \Big].
+  \label{eq:rhobo}
+  \end{equation}
+\end{itemize}
+
+\section{What the code actually does}\label{sec:algorithm}
+Everything the code computes is listed here. There are two phases: an initialization, done once, which only prepares
+$g$ and $K$ (and, with the dynamic reference, $\rBO(0)=\rho_0$); and the time propagation of
+Eqs.~(\ref{eq:rho})--(\ref{eq:force}) with these fixed $g$ and $K$. No frequency-dependent quantity ($\chi(\omega)$,
+$\Pi(\omega)$) is ever computed: they appear only in the analysis of section~\ref{sec:pi_omega}.
+
+\subsection*{Initialization (\texttt{Lattice::initialize}, once)}
+\begin{enumerate}
+\item \textbf{Coupling} (\texttt{read\_coupling}). $g_\mu(R_e)$ at $q=0$ from \file{prefix.epmatwp}, times
+  \texttt{coupling\_scale}; Fourier sum to the $k$ points of the simulation, $g_\mu(k)=\sum_{R_e}e^{ik\cdot R_e}g_\mu(R_e)$;
+  hermitized, $g\leftarrow(g+g^\dagger)/2$; FFT to the $R$ grid. Check: $\max|H_{\rm EPW}(k)-H_{\rm tb}(k)|$ (same
+  Wannier gauge).
+\item \textbf{Force constants} (\texttt{read\_dynamical\_matrix}). Masses and $C_{\mu\nu}$ of ph.x at $\Gamma$; the
+  acoustic sum rule imposed on $C$ (if \texttt{acoustic\_sum\_rule}); $K\leftarrow (C+C^\dagger)/2 = \KBO$. Normal modes
+  of $\KBO$, only for the output \file{Phonon_modes.txt}.
+\item \textbf{Rigid translation} (\texttt{remove\_translation\_from\_coupling}, if \texttt{acoustic\_sum\_rule}).
+  $g_{\kappa\alpha}\leftarrow g_{\kappa\alpha}-\frac{M_\kappa}{M_{\rm tot}}\sum_{\kappa'}g_{\kappa'\alpha}$.
+\item \textbf{Unscreening} (\texttt{unscreen\_coupling}, only \texttt{"screened"} with the mean field). For each $\mu$:
+  \begin{itemize}
+  \item $\tilde g_\mu = \chi_0 g_\mu$: $U^\dagger g_\mu U$ (Bloch gauge), each element times
+    $\frac{f_n-f_m}{\varepsilon_n-\varepsilon_m}$ (zero for equal occupations or degenerate pairs), back with
+    $U(\cdot)U^\dagger$;
+  \item $\Sigma[\tilde g_\mu]$: $\rho_0+\tilde g_\mu$ to $R$, \texttt{MeanField::self\_energy} (which computes
+    $\Sigma[\rho-\rho_0]$), back to $k$;
+  \item $g_\mu \leftarrow g_\mu - \Sigma[\tilde g_\mu]$ (now $\gb_\mu$); $\tilde g_\mu$ is kept for the next step.
+  \end{itemize}
+\item \textbf{Static response} (\texttt{static\_response}, only \texttt{"static"}). For each $\nu$,
+  $\delta\rho_\nu = \tilde g_\nu$ (after the unscreening), or $\chi_0 g_\nu$ (IPA), or the Anderson solution of
+  $\delta\rho_\nu=\chi_0(g_\nu+\Sigma[\delta\rho_\nu])$ (\texttt{"bare"} with the mean field). Then
+  $\Pi_{\mu\nu} = \frac{s}{N}\sum_k\mathrm{Tr}[g_\mu\,\delta\rho_\nu]$ (\texttt{MPI\_Allreduce}),
+  $\Pi\leftarrow(\Pi+\Pi^\dagger)/2$, and $K\leftarrow K-\Pi$. $\Pi$ and $\tilde g$ are then discarded.
+\item $K$ is stored in \texttt{force\_constants\_}; from here on $g$ and $K$ never change.
+\end{enumerate}
+
+\subsection*{Each stage of the time stepper (\texttt{Propagator::derivative}, e.g.\ 4 times per RK4 step)}
+The state is $(\rho,\,u,\,\dot u)$, plus $\rBO$ with the dynamic reference.
+\begin{enumerate}
+\item \textbf{Hamiltonian} (\texttt{build\_hamiltonian}): $H = H_0+\mathbf E(t)\cdot\mathbf r$ (or the Peierls phase);
+  $H \mathrel{+}= \Sigma[\rho-\rho_0]$ in $R$; $H(R)\mathrel{+}=\sum_\mu u_\mu\,g_\mu(R)$ (\texttt{add\_coupling}).
+\item \textbf{Force} (\texttt{Lattice::force}), with the same $\rho$, in $R$:
+  $F_\mu = s\sum_R\sum_{mn}\mathrm{Re}\big[g_{\mu,mn}(R)\,(\rho-\rho_{\rm ref})^*_{mn}(R)\big]$, equal to
+  $\inner{g_\mu}{\rho-\rho_{\rm ref}}$ by Parseval; $\rho_{\rm ref}=\rho_0$, or the current $\rBO$.
+\item \textbf{Electrons}: $\dot\rho = -i[H,\rho]$ (+ gradient term without Peierls, + decay if set).
+\item \textbf{Only dynamic}: the same two steps 1 and 3 for $\rBO$, with $\mathbf E=0$, no Peierls phase, no force.
+\item \textbf{Lattice} (\texttt{Lattice::derivative}): $\dot u = v$,
+  $\dot v = -(Ku+F)/M - (2/\tau)\,v$.
+\end{enumerate}
+The force is the full, non-linear $\inner{g}{\rho-\rho_{\rm ref}}$ of the propagated $\rho$: in particular it contains
+the retarded response of the electrons to $u(t)$ at all orders, which is what the linear-response quantity
+$\Pi(\omega)$ of section~\ref{sec:pi_omega} describes.
+
+\section{The nine combinations}\label{sec:table}
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.55}
+\begin{tabularx}{\textwidth}{@{}c c c >{\raggedright\arraybackslash}p{3.3cm} c c L@{}}
+\toprule
+mean field & \texttt{coupling} & reference & $g$ in $H$ and in $F$ & $K$ & $\rho_{\rm ref}$ & $\Pi$ (computed once, at the beginning) \\
+\midrule
+off & any & none    & $\gf$ & $\KBO$ & $\rho_0$ & --- \\
+off & any & static  & $\gf$ & $\KBO-\Pi$ & $\rho_0$ & $\Pi = \inner{g}{\chi_0 g}$ (one $\chi_0$ per mode) \\
+off & any & dynamic & $\gf$ & $\KBO$ & $\rBO$ & --- \\
+\midrule
+on & screened & none    & $\gb = \gs - \Sigma[\chi_0\gs]$ & $\KBO$ & $\rho_0$ & --- \\
+\rowcolor{default}
+on & screened & static  & $\gb = \gs - \Sigma[\chi_0\gs]$ & $\KBO-\Pi$ & $\rho_0$ & $\Pi = \inner{\gb}{\chi_0\gs}$ (no extra cost: $\chi_0\gs$ comes from the unscreening) \\
+on & screened & dynamic & $\gb = \gs - \Sigma[\chi_0\gs]$ & $\KBO$ & $\rBO$ & --- \\
+\midrule
+on & bare & none    & $\gf$ & $\KBO$ & $\rho_0$ & --- \\
+\rowcolor{anderson}
+on & bare & static  & $\gf$ & $\KBO-\Pi$ & $\rho_0$ & $\delta\rho = (1-\chi_0\Sigma)^{-1}\chi_0 g$ by Anderson mixing, $\Pi = \inner{g}{\delta\rho}$ \\
+on & bare & dynamic & $\gf$ & $\KBO$ & $\rBO$ & --- \\
+\bottomrule
+\end{tabularx}
+\caption{Ingredients of Eqs.~(\ref{eq:rho})--(\ref{eq:force}) for each combination of the parameters. In blue the
+default. Without the mean field \texttt{"screened"} and \texttt{"bare"} are the same thing ($\gb = \gs$ when
+$\Sigma = 0$). In orange the only case that needs a self-consistent (iterative) solution.}
+\label{tab:all}
+\end{table}
+
+\section{The coupling: what the electrons feel in the static limit}\label{sec:coupling}
+During the propagation the mean field generates, through $\Sigma[\Dr]$, the screening of the displacement by the
+electrons of the model. For a static displacement the electrons respond with $\delta\rho = \chi_0 V$, where $V$ is the
+total perturbation, coupling plus induced self energy:
+\begin{equation}
+V = g + \Sigma[\delta\rho] = g + \Sigma\chi_0 V \quad\Longrightarrow\quad V = (1-\Sigma\chi_0)^{-1} g \equiv \varepsilon^{-1} g .
+\end{equation}
+The coupling of EPW is already screened by all the electrons of DFT, so with the mean field it must be unscreened
+first. Asking $V=\gs$ gives the coupling to put in $H$ directly, without iterations:
+\begin{equation}
+\gb = \varepsilon\,\gs = \gs - \Sigma[\chi_0\gs].
+\end{equation}
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}c c c l@{}}
+\toprule
+mean field & \texttt{coupling} & $g$ in $H$ & static perturbation $V$ felt by the electrons \\
+\midrule
+off & any      & $\gf$ & $\gf$ \\
+on  & screened & $\gb=\gs-\Sigma[\chi_0\gs]$ & $\gs$, exactly the one of DFPT \\
+on  & bare     & $\gf$ & $\varepsilon^{-1}\gf = (1-\Sigma\chi_0)^{-1}\gf$ \\
+\bottomrule
+\end{tabular}
+\caption{The static perturbation felt by the electrons. From the screened to the bare coupling is a multiplication
+by $\varepsilon$; from the bare to the screened one is an inversion of $\varepsilon$.}
+\label{tab:coupling}
+\end{table}
+
+\section{The adiabatic reference: the frequency of the lattice}\label{sec:reference}
+$\KBO$ already contains the static screening of the lattice by the electrons, $\KBO = K^0 + \Pi$, and the propagated
+electrons generate it again. The reference decides how this double counting is removed. Without laser, at linear order,
+the response of the electrons to $u(t)$ at the frequency $\omega$ gives the force constants $\Pi(\omega)$, so the
+lattice oscillates with:
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{@{}l c c L@{}}
+\toprule
+reference & $K$ & $M\omega^2 \approx$ & meaning \\
+\midrule
+none    & $\KBO$     & $\KBO + \Pi(\omega)$ & the screening is counted twice: the lattice is too soft \\
+static  & $\KBO-\Pi$ & $\KBO + \Pi(\omega) - \Pi(0)$ & non-adiabatic phonons (Lazzeri--Mauri 2006); in an insulator
+  $\KBO$ up to $(\omega/E_{\rm gap})^2$ \\
+dynamic & $\KBO$     & $\KBO$ exactly & $\rBO$ removes the whole response to $u(t)$, also the physical
+  non-adiabatic correction $\Pi(\omega)-\Pi(0)$ of the ground state; twice the cost of the propagation \\
+\bottomrule
+\end{tabularx}
+\caption{Frequencies of the free lattice (no laser) for the three adiabatic references.}
+\label{tab:reference}
+\end{table}
+
+With the static reference using $\KBO-\Pi$ and the whole $\rho-\rho_0$ in the force is the same as using $\KBO$ and
+only the excited part $\rho-\rho_0-\sum_\nu u_\nu\delta\rho_\nu$, since
+$\inner{g_\mu}{\sum_\nu u_\nu\delta\rho_\nu} = \sum_\nu \Pi_{\mu\nu}u_\nu$.
+
+\section{\texorpdfstring{Static vs dynamic $\rho_{\rm BO}$, and $\Pi(\omega)$: a linear-response analysis}{Static vs dynamic rho\_BO, and Pi(omega): a linear-response analysis}}\label{sec:pi_omega}
+This section does not describe something the code computes (that is section~\ref{sec:algorithm}): it linearizes the
+equations of section~\ref{sec:common} without laser, to understand which frequency the lattice gets. The last
+paragraph discusses which reference is right, also with the laser.
+
+
+\paragraph{Both references subtract a $\rho_{\rm BO}$.} The force is always $\inner{g}{\rho-\rBO}$ with $\KBO$; the
+static reference written as $\KBO-\Pi$ is only a convenient way of doing the same thing. What differs is the
+$\rBO$ that is subtracted:
+\begin{align}
+\text{static:}\quad  & \rBO(t) = \rho_0 + \sum_\nu u_\nu(t)\,\delta\rho_\nu
+  && \text{depends only on } u \text{ at the same time,}\\
+\text{dynamic:}\quad & \rBO(t) \text{ propagated with Eq.~(\ref{eq:rhobo})}
+  && \text{depends on the whole history } u(t'<t).
+\end{align}
+The static one is the Born--Oppenheimer state: electrons infinitely fast, always in the ground state of the displaced
+lattice (at first order in $u$). The dynamic one has the finite response time of the electrons ($\sim 1/E_{\rm gap}$):
+for $u(t)=u\cos\omega t$ the two are $\delta\rBO = \chi(0)\,g\,u(t)$ and $\delta\rBO = \chi(\omega)\,g\,u(t)$. They
+coincide only for $\omega\to 0$.
+
+\paragraph{Which one must be subtracted.} The subtraction removes what $\KBO$ already contains. ph.x is static DFPT,
+so $\KBO$ contains the instantaneous response $\Pi(0)$, which is what the static reference removes; the remaining
+$\Pi(\omega)-\Pi(0)$ is physics that ph.x does not have (non-adiabatic phonons). The dynamic reference removes
+$\Pi(\omega)$, i.e.\ also this physical correction.
+
+\paragraph{Two-level example.} One valence and one conduction band, gap $\Delta$, coupling $g_{cv}=g$, IPA. With the
+convention $u\propto e^{-i\omega t}$, $\delta\rho_{nm} = \frac{f_n-f_m}{\varepsilon_n-\varepsilon_m-\omega-i\eta}\,(g u)_{nm}$, and
+\begin{equation}
+\Pi(\omega) = -\frac{2s|g|^2\Delta}{\Delta^2-\omega^2}
+            = \Pi(0)\Big[1+\frac{\omega^2}{\Delta^2}+\dots\Big], \qquad \Pi(0) = -\frac{2s|g|^2}{\Delta}.
+\end{equation}
+The dynamic $\rBO$ is larger than the static one by $1+(\omega/\Delta)^2$: in an insulator with $\omega\ll E_{\rm gap}$
+the two references are equivalent up to this factor (for the real hBN, 1351.2 vs 1349.5~cm$^{-1}$).
+
+\paragraph{Many bands.} Each valence--conduction pair at each $k$ is a two-level system with its own transition
+energy $\Delta_{cv}(k)=\varepsilon_c(k)-\varepsilon_v(k)$. Collecting the pairs $(c,v)$ and $(v,c)$ ($g$ hermitian at $\Gamma$),
+\begin{equation}
+\Pi_{\mu\nu}(\omega) = -\frac{s}{N}\sum_k\sum_{v,c}\frac{2\Delta_{cv}(k)\,\mathrm{Re}\big[g_{\mu,vc}(k)\,g_{\nu,cv}(k)\big]}{\Delta_{cv}(k)^2-\omega^2}
+\end{equation}
+(plus an imaginary part antisymmetric in $\mu\nu$, which vanishes after the sum over $k$ with time-reversal symmetry).
+For small $\omega$,
+\begin{equation}
+\Pi_{\mu\nu}(\omega)-\Pi_{\mu\nu}(0) \simeq -\omega^2\,\frac{s}{N}\sum_k\sum_{v,c}\frac{2\,\mathrm{Re}\big[g_{\mu,vc}\,g_{\nu,cv}\big]}{\Delta_{cv}(k)^3}:
+\end{equation}
+an average of $(\omega/\Delta_{cv})^2$ over the transitions, weighted by $|g|^2/\Delta$, dominated by small gaps with
+large coupling. For $\omega$ above the smallest $\Delta_{cv}(k)$ the poles give $\Pi(\omega)$ an imaginary part: the
+phonon decays into electron--hole pairs. With the mean field the poles are the excitations $\Omega_\lambda$ of the
+model (excitons with HSEX) instead of the $\Delta_{cv}(k)$:
+$\Pi(\omega) = -\sum_\lambda 2\Omega_\lambda|\langle g,\lambda\rangle|^2/(\Omega_\lambda^2-\omega^2)$.
+Bands outside the Wannier model enter only statically, through $\gs$ and $\KBO$.
+
+\paragraph{$\Pi(0)$ in the code.} A $3N_{\rm at}\times 3N_{\rm at}$ matrix (Ha/bohr$^2$) returned by
+\texttt{Lattice::static\_response}, computed once in \texttt{Lattice::initialize} and immediately subtracted from $K$:
+\begin{center}
+\texttt{auto Pi = static\_response(...);\quad K(mu, nu) -= Pi(mu, nu);}
+\end{center}
+It is not kept: afterwards it exists only inside \texttt{force\_constants\_} $=\KBO-\Pi(0)$. The recap prints the
+frequencies of $\KBO-\Pi(0)$ next to those of ph.x, and the residual of the acoustic sum rule of $\Pi$; $\Pi$ itself
+is not written to any file.
+
+\paragraph{$\Pi(\omega)$ in the code.} It does not exist: no variable or routine computes it. It is the name, in
+linear response, of what the propagation of section~\ref{sec:algorithm} does: $F(t)$ contains the response of the
+electrons to the whole history of $u$; linearized,
+\begin{equation}
+F_\mu(t) = \sum_\nu\int dt'\,\Pi_{\mu\nu}(t-t')\,u_\nu(t') \quad\xrightarrow{\;u\,\propto\, e^{-i\omega t}\;}\quad
+F = \Pi(\omega)\,u ,
+\end{equation}
+with, in IPA,
+$\Pi_{\mu\nu}(\omega) = \frac{s}{N}\sum_k\sum_{nm} g_{\mu,mn}\,g_{\nu,nm}\,\frac{f_n-f_m}{\varepsilon_n-\varepsilon_m-\omega-i\eta}$,
+and with the mean field $\chi_0(\omega)\to\chi(\omega) = (1-\chi_0(\omega)\Sigma)^{-1}\chi_0(\omega)$ (TDHF response of
+the model, which the linearized Eq.~(\ref{eq:rho}) solves without laser). The code always uses the full $F$, also
+beyond linear order and with the electrons excited by the laser.
+
+\paragraph{How to see it.} $\Pi(\omega)$ can only be extracted afterwards: from a run without laser and a small
+\texttt{initial\_displacement}, the frequency $\omega$ of $u(t)$ in \file{Lattice.txt} satisfies
+$M\omega^2 = \KBO-\Pi(0)+\Pi(\omega)$, so, projected on the mode, $\Pi(\omega)-\Pi(0) = M\omega^2-\KBO$. This is
+what the ``static limit'' check of \file{ci-test/check_phonons.py} measures, comparing $\omega$ with ph.x.
+
+\paragraph{Which reference is better, also with the laser.} The criterion is the one above: remove only what $\KBO$
+already contains. $\KBO$ is static (DFPT) and harmonic (second derivative of the energy at equilibrium), so it
+contains exactly one electronic contribution, the static response of the ground state at linear order in $u$,
+$\Pi(0)$. Everything else is physics that ph.x does not have and must be kept. With the laser, $\rho$ contains also the
+response of the excited electrons to $u$; $\rBO$ never sees the laser, so this part is kept by both references.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{@{}L c c c@{}}
+\toprule
+contribution of the electrons to the force & in $\KBO$? & static & dynamic \\
+\midrule
+$\Pi(0)$: static response of the ground state, linear in $u$ & yes & removed \textcolor{green!50!black}{\checkmark} & removed \textcolor{green!50!black}{\checkmark} \\
+$\Pi(\omega)-\Pi(0)$: non-adiabatic response of the ground state & no & kept \textcolor{green!50!black}{\checkmark} & removed \textcolor{red!70!black}{$\times$} \\
+response of the ground state non-linear in $u$ & no ($\KBO$ is harmonic) & kept \textcolor{green!50!black}{\checkmark} & removed \textcolor{red!70!black}{$\times$} \\
+response of the electrons excited by the laser & no & kept \textcolor{green!50!black}{\checkmark} & kept \textcolor{green!50!black}{\checkmark} \\
+\bottomrule
+\end{tabularx}
+\caption{What each adiabatic reference removes from the force of the electrons. A \checkmark\ means the right choice:
+remove what is in $\KBO$, keep the rest.}
+\label{tab:better}
+\end{table}
+
+The dynamic $\rBO$ is the whole response of the ground state to $u(t)$, at all frequencies and all orders, so it removes
+more than what $\KBO$ contains: the non-adiabatic correction and the anharmonic response of the electrons of the
+model, which are not double counted with the static reference, because ph.x has neither of them. \textbf{The static
+reference is therefore the right one also with the laser.} In practice the difference is small in an insulator:
+$(\omega/E_{\rm gap})^2$ for the non-adiabatic part, and the non-linear terms matter only for large displacements; on
+the part that matters with the laser, the response of the excited electrons, the two references coincide. The dynamic
+reference is useful as a test (without laser it gives exactly $\KBO$) and as a cross-check of the static one (a large
+difference means that the non-adiabatic correction is not small); it doubles the cost of the propagation.
+
+\section{How \texorpdfstring{$\Pi$}{Pi} is computed}\label{sec:pi}
+Only with the static reference. The static response $\delta\rho_\nu$ solves
+\begin{equation}
+\delta\rho_\nu = \chi_0\big(g_\nu + \Sigma[\delta\rho_\nu]\big),
+\end{equation}
+and then $\Pi_{\mu\nu} = \inner{g_\mu}{\delta\rho_\nu}$, symmetrized, $\Pi \leftarrow (\Pi+\Pi^\dagger)/2$.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.5}
+\begin{tabularx}{\textwidth}{@{}c c l l L@{}}
+\toprule
+mean field & \texttt{coupling} & $\delta\rho_\nu$ & $\Pi_{\mu\nu}$ & cost \\
+\midrule
+off & any      & $\chi_0 g_\nu$ & $\inner{g_\mu}{\chi_0 g_\nu}$ & one $\chi_0$ per mode \\
+on  & screened & $\chi_0\gs_\nu$ & $\inner{\gb_\mu}{\chi_0\gs_\nu}$ & none: $\chi_0\gs$ is already computed by the
+  unscreening (one $\chi_0$ and one $\Sigma$ per mode) \\
+on  & bare     & $(1-\chi_0\Sigma)^{-1}\chi_0 g_\nu$ & $\inner{g_\mu}{\delta\rho_\nu}$ & Anderson mixing, one $\chi_0$
+  and one $\Sigma$ per iteration and per mode \\
+\bottomrule
+\end{tabularx}
+\caption{The static response and $\Pi$. With \texttt{"screened"} the solution is known without iterations because
+$\gb + \Sigma[\chi_0\gs] = \gs$: the total perturbation is $\gs$ by construction.}
+\label{tab:pi}
+\end{table}
+
+\paragraph{Why Anderson mixing exists.} Only in the combination mean field + \texttt{"bare"} + \texttt{"static"}
+(orange in Table~\ref{tab:all}). There the starting point is the bare coupling, and the screened response requires
+$\varepsilon^{-1}$: a linear system of size $N\,n_b^2$, solved iteratively because the plain iteration
+$\delta\rho \leftarrow \chi_0(g+\Sigma[\delta\rho])$ does not converge with a strong mean field. The option
+\texttt{"bare"} was introduced first, for the synthetic tests, where $g$ is bare by construction; with a real EPW
+run (\texttt{"screened"}) the self-consistency is never needed.
+
+\paragraph{Sign.} In an insulator $f_n-f_m$ and $\varepsilon_n-\varepsilon_m$ have opposite signs for each
+valence--conduction pair, so $\chi_0$ and $\Pi$ are negative: $K^0 = \KBO-\Pi$ is harder than $\KBO$, as expected
+(the electrons soften the lattice).
+
+\end{document}

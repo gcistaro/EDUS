@@ -11,6 +11,7 @@
 #include "kGradient/kGradient.hpp"
 #include "MeanField/MeanField.hpp"
 #include "Propagator/Propagator.hpp"
+#include "Phonons/Lattice.hpp"
 #include "Output/OutputManager.hpp"
 //#include "initialize.hpp"
 //#include "Json/json.hpp"
@@ -44,6 +45,8 @@ class Simulation
         kGradient kgradient_;
         /// Total laser acting on the system, as a sum over the single lasers
         SetOfLaser setoflaser_;
+        /// Lattice coupled to the electrons (Ehrenfest dynamics), used only if phonons are enabled
+        phonon::Lattice lattice_;
         /// Time propagation of the density matrix
         Propagator propagator_;
         /// Writes the outputs during the propagation

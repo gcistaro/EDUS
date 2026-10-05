@@ -2,6 +2,7 @@
 #define STATE_HPP
 
 #include "Operator/Operator.hpp"
+#include "Phonons/EhrenfestState.hpp"
 
 namespace electron
 {
@@ -11,8 +12,8 @@ private:
         /// Full Hamiltonian: @f$ H_ = H0 + H_{\text{eff}} +E(t)\cdot \Xi @f$, while the term
         /// with the gradient is treated separately
         Operator<std::complex<double>> H_;
-        // Density matrix of the system
-        Operator<std::complex<double>> DensityMatrix_;
+        /// Propagated variables: density matrix of the system and, with phonons, coordinates of the lattice
+        EhrenfestState variables_;
         // For printing stuff without touching the DensityMatrix we propagate
         Operator<std::complex<double>> aux_DM_;
         /// Phase acquired in the peierls transformation, to be calculated at each time step.
@@ -26,7 +27,11 @@ public:
 
 
         Operator<std::complex<double>>& H() {return H_;};
-        Operator<std::complex<double>>& DensityMatrix() {return DensityMatrix_;};
+        Operator<std::complex<double>>& DensityMatrix() {return variables_.rho;};
+        /// Coordinates of the lattice (not allocated without phonons)
+        phonon::Coordinates& lattice() {return variables_.lattice;};
+        /// Density matrix and lattice, propagated together in the Ehrenfest dynamics
+        EhrenfestState& variables() {return variables_;};
         Operator<std::complex<double>>& aux_DM() {return aux_DM_;};
         mdarray<std::complex<double>,1>& Peierls_phase() {return Peierls_phase_;};
     };
@@ -38,7 +43,7 @@ public:
         auto num_kpoints = gridstructure__.kgrid()->get_TotalSize();
 
         H_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "H");
-        DensityMatrix_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "DensityMatrix");
+        variables_.rho.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "DensityMatrix");
         aux_DM_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "aux_DM");
         Peierls_phase_.initialize({mpindex.get_nlocal()});
     }
@@ -46,12 +51,12 @@ public:
     inline void State::initialize_device()
     {
         H_.initialize_device();
-        DensityMatrix_.initialize_device();
+        variables_.rho.initialize_device();
         aux_DM_.initialize_device();
         Peierls_phase_.initialize_device();
 
         H_.transfer_to(Processor::device);
-        DensityMatrix_.transfer_to(Processor::device);
+        variables_.rho.transfer_to(Processor::device);
         aux_DM_.transfer_to(Processor::device);
         Peierls_phase_.transfer_to(Processor::device);
     }
