@@ -4,7 +4,7 @@ from custom_functions.fouriertransform import FourierTransform
 from custom_functions.window import CutWindow
 from scipy import constants
 
-def get_absorbance(t_au, Vt_au, Et_au, limits=[], smearing=0.):
+def get_absorbance(t_au, Vt_au, Et_au, limits=[], smearing=0., resolution=0.01):
     """
     This function calculates the absorbance in frequency domain given as input the time grid (WARNING, need to be equally spaced),
     The velocity over the time grid, the electric field using for the time propagation. 
@@ -12,10 +12,10 @@ def get_absorbance(t_au, Vt_au, Et_au, limits=[], smearing=0.):
     For more details about the smearing, please check the function FourierTransform.
     """
     print("Fourier transforming current ...", end=" ", flush=True)
-    freq_eV, Vw_au = FourierTransform(t_au, Vt_au, smearing)
+    freq_eV, Vw_au = FourierTransform(t_au, Vt_au, smearing, resolution)
     print("done.")
     print("Fourier transforming electric field...", end=" ", flush=True)
-    _, Ew_au       = FourierTransform(t_au, Et_au, 0.)
+    _, Ew_au       = FourierTransform(t_au, Et_au, 0., resolution)
     print("done.")
 
     #cut a window

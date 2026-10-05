@@ -17,6 +17,7 @@ import argparse, sys
 parser=argparse.ArgumentParser()
 
 parser.add_argument("--smearing", default=0.2, help="Smearing used in the current. The current will decay exponentially as e^{-t/smearing}", type=float)
+parser.add_argument("--resolution", default=0.01, help="Spacing of the frequency grid (eV): the signal is padded with zeros up to a time 1/resolution", type=float)
 parser.add_argument("--window", help="Window of energy where we want to plot the absorbance, numbers given in a sequence", nargs=2, type=float)
 parser.add_argument("--folder", default="./Output/", help="Folder where the .txt files are contained")
 parser.add_argument("--version", default="new", help="Version of the EDUS code that you used")
@@ -25,6 +26,7 @@ args=parser.parse_args()
 #print in output some infos
 print("Starting calculation of Absorbance. Here are the input parameters with their values:")
 print("smearing (eV):    ", args.smearing)
+print("resolution (eV):  ", args.resolution)
 print("window (eV)  :    ", args.window)
 print("folder       :    ", args.folder)
 print("version      :    ", args.version)
@@ -34,7 +36,7 @@ print("version      :    ", args.version)
 print("Reading t, E(t), V(t)...", end=" ", flush=True)
 t_au, _, Et_au, _, Vt_au = read_observables(args.folder, args.version)
 print("done.")
-freq_eV, Absorbance = get_absorbance(t_au, Vt_au, Et_au, args.window, args.smearing)
+freq_eV, Absorbance = get_absorbance(t_au, Vt_au, Et_au, args.window, args.smearing, args.resolution)
 
 
 print("Plotting absorbance...", end=" ", flush=True)
