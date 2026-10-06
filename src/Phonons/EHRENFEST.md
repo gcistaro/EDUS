@@ -104,15 +104,16 @@ Therefore **bare $K^0$, bare $g^{\rm b}$ and $\Delta\rho=\rho-\rho_0$** is the c
 BO frequencies $\omega_\nu^2$ and/or the screened EPW coupling together with the dynamical $\Sigma[\Delta\rho]$
 counts twice the screening of $g$ and/or the softening of the frequencies.
 
-Practical choice of $K^0$: $K^0 \equiv K^{\rm BO} - \Pi^{\rm model}$, with $\Pi^{\rm model}$ computed with the same
-electronic model propagated by EDUS ($H_0$, Hartree, $W$), so that the static limit reproduces the DFPT phonons exactly
-(section 3.3 gives the formulas as implemented).
+In practice EDUS keeps $K^{\rm BO}$ of ph.x and pushes the atoms only with $\rho-\rho_{\rm BO}(u)$, the part of the density
+matrix beyond the adiabatic response of the same electronic model propagated by EDUS ($H_0$, Hartree, $W$). This is
+identical to $K^0 \equiv K^{\rm BO} - \Pi^{\rm model}$ with $\rho-\rho_0$, and the static limit reproduces the DFPT phonons
+exactly (section 3.3 gives the formulas as implemented).
 
 The consistent alternative with renormalized quantities is the quasi-phonon equation (Eq. 50 of arXiv:2502.06368):
 frequencies $\Omega$, coupling $\tilde g^{\rm s}$ and only the nonlinear part $\Delta\rho^{(r)}$ of the density matrix.
 Born effective charges (section 8): with dynamical screening use the bare (ionic) charges.
 
-### 3.2 Which "bare" coupling: unscreening within the model
+### 3.2 Which "bare" coupling, and the screened one
 
 "Bare" must be understood relative to the model. The fully bare coupling ($\partial V_{\rm ion}$ only, all the
 Hxc response removed) is **wrong** for EDUS: it removes also the screening of the bands outside the Wannier model
@@ -121,18 +122,27 @@ again, so the electrons would feel a coupling much larger than the physical one.
 everything except the electrons of the model, the same idea of the constrained RPA/DFPT (Nomura and Arita,
 PRB 92, 245108 (2015)).
 
-This $g^{\rm b}$ is obtained from the screened coupling of a standard EPW run, $g^{\rm s}$. In the static limit the
-electrons of the model respond with $\delta\rho = \chi_0 V$ to the total perturbation $V = g^{\rm b} + \Sigma[\delta\rho]$.
-Asking that $V$ is the DFPT coupling, $V = g^{\rm s}$, gives $\delta\rho = \chi_0 g^{\rm s}$ and, exactly and without
-iterations ($\Sigma$ is linear in $\delta\rho$),
+**Two ways of feeding the model, chosen in input.** EDUS reads $g^{\rm b}$ from an EPW calculation (`epw_directory`)
+and, optionally, $g^{\rm s}$ from a second one (`epw_directory_screened`, same Wannier functions):
 
-$$ g^{\rm b} = g^{\rm s} - \Sigma\big[\chi_0\, g^{\rm s}\big]. $$
+- **only $g^{\rm b}$**: $H = H_e + u\cdot g^{\rm b} + \Sigma[\rho-\rho_0]$. The mean field generates the screening of the model;
+  without it (IPA) the electrons feel the unscreened coupling.
+- **$g^{\rm b}$ and $g^{\rm s}$**: $H = H_e + u\cdot g^{\rm s} + \Sigma[\rho-\rho_{\rm BO}]$. The static screening is already in
+  $g^{\rm s}$, so the mean field acts only on the excited part; in the static limit $\rho=\rho_{\rm BO}$ and the electrons feel
+  exactly the coupling of DFPT, whatever the mean field. $g^{\rm s}$ enters only the electronic equation.
 
-With this $g^{\rm b}$ the static limit gives exactly the coupling of DFPT to the electrons and, with the static adiabatic
-reference, exactly the force constants of ph.x to the lattice. The approximations: the screening of the bands outside
-the model is static and the one of DFT (it is at high energy), and the response inside the model is the one of its
-mean field (Hartree + SEX with the model $W$), not the Hxc of DFT. Without the mean field (IPA) $g^{\rm b} = g^{\rm s}$.
-This is the option `coupling = "screened"` (default); `"bare"` uses the files as they are (synthetic tests).
+In both cases the force on the lattice is $F[\rho-\rho_{\rm BO}]$ with $g^{\rm b}$ and the force constants are $K^{\rm BO}$ of ph.x
+(section 3.3). With $\rho_{\rm BO} = \rho_0 + u\cdot\chi_0 g^{\rm s}$ (static reference) the second Hamiltonian is exactly
+$H_e + u\cdot(g^{\rm s}-\Sigma[\chi_0 g^{\rm s}]) + \Sigma[\rho-\rho_0]$: the two ways coincide if
+$g^{\rm b} = g^{\rm s} - \Sigma[\chi_0 g^{\rm s}]$, i.e. if the mean field of the model reproduces the Hxc screening that DFPT gives
+to the bands of the model. The recap prints $\max|g^{\rm s}-\Sigma[\chi_0 g^{\rm s}]-g^{\rm b}|/\max|g^{\rm b}|$; when it is not small
+the electrons and the lattice see different couplings and the total energy is not exactly conserved.
+$\Pi = \frac{s}{N}\sum_k\mathrm{Tr}[g^{\rm b}\chi_0 g^{\rm s}]$ has one bare and one screened vertex (Berges et al., PRX 13, 041009 (2023)).
+
+Which $g^{\rm b}$: the right one is the constrained DFPT coupling above (cDFPT, not available in the QE 7.6 / EPW 6.1
+installed here). The local EPW (`~/codes/q-e-EPW-6.1`) has `bare_only = .TRUE.` hardcoded in `ep_coarse.f90` and
+`dvqpsi.f90`: it gives the fully bare $\partial V_{\rm ion}$ (no `dvscf`, no nonlinear core correction), with the caveat
+above; with `.FALSE.` it gives the standard screened $g^{\rm s}$.
 
 Note on the route "EPW with `lnoloc`": stock ph.x refuses `lnoloc` for phonons (`phq_readin.f90`:
 "only dielectric constant with lrpa or lnoloc"). One could zero the induced potential read by EPW (`dvscf_read`),
@@ -215,41 +225,31 @@ The steps, in the order of `Lattice::initialize`:
    force on the center of mass vanishes and $\Pi$ satisfies the sum rule by itself (checked in the recap), with $H$, the
    force and $\Pi$ built from the same coupling. The correction must be on $g$: imposing the sum rule on $\Pi$ alone
    breaks the static limit, because the propagated electrons generate the uncorrected $\Pi$. The step is linear and done
-   before the unscreening, so every quantity below is built from the corrected coupling.
+   first, on both couplings, so every quantity below is built from the corrected couplings.
 
-4. **Born–Oppenheimer response and unscreening** (`unscreen_coupling`, if `coupling = "screened"` and the mean field is on).
-   The static response per unit displacement is (BO (19) with (20), q = 0)
+4. **Consistency of the two couplings** (`screening_mismatch`, only with $g^{\rm s}$): $\max|g^{\rm s}-\Sigma[\chi_0 g^{\rm s}]-g^{\rm b}|/\max|g^{\rm b}|$,
+   printed in the recap (section 3.2).
 
-   $$ \tilde g_\mu = \chi_0\, g^{\rm s}_\mu, \qquad \Delta\rho^{\rm BO}(u) = \sum_\mu u_\mu\,\tilde g_\mu \quad \text{(BO (18))}, $$
+5. **Static response and electronic force constants** (`static_response`, only with `adiabatic_reference = "static"`):
 
-   $\chi_0$ acting on the self-consistent perturbation $g^{\rm s}$, as in BO (2)–(9). The electrons of the model generate
-   $\Sigma[\Delta\rho]$ during the propagation, so the coupling in $H$ must not contain it (BO (28)):
+   $$ \Pi_{\mu\nu} = \frac{s}{N}\sum_k \mathrm{Tr}\big[g^{\rm b}_\mu(k)\,\delta\rho_\nu(k)\big], \qquad
+      \delta\rho_\nu = \begin{cases} \chi_0\big(g^{\rm b}_\nu + \Sigma[\delta\rho_\nu]\big) & \text{only } g^{\rm b} \\ \chi_0\, g^{\rm s}_\nu & \text{with } g^{\rm s}\end{cases} $$
 
-   $$ g^{\rm b}_\mu = g^{\rm s}_\mu - \Sigma[\tilde g_\mu]. $$
+   (BO (18)–(19)). With $g^{\rm s}$ the static limit has $\Sigma[\rho_{\rm BO}-\rho_{\rm BO}] = 0$, so one step is exact; with $g^{\rm b}$ only
+   the linear fixed point is solved by Anderson mixing (one step without the mean field). $\Pi$ is not symmetrized, and
+   $\delta\rho_\nu$ is kept in R: $\rho_{\rm BO}(u) = \rho_0 + \sum_\nu u_\nu\,\delta\rho_\nu$ is built at every stage of the time stepper.
+   $K^{\rm BO}-\Pi$ (the bare lattice) is only printed in the recap.
 
-   Then $g^{\rm b}_\mu + \Sigma[\tilde g_\mu] = g^{\rm s}_\mu$, hence $\chi_0\big(g^{\rm b}_\mu + \Sigma[\tilde g_\mu]\big) = \tilde g_\mu$: $\tilde g_\mu$ is exactly the
-   self-consistent static response of the model driven by $g^{\rm b}$, and in the static limit the electrons feel $g^{\rm s}$.
-   $\tilde g$ is kept (`gtilde_`) for the next step. Without the mean field $g^{\rm b} = g^{\rm s}$; with `coupling = "bare"` the
-   files are taken as $g^{\rm b}$ and there is no $\tilde g$ yet.
+During the propagation the force $F_\mu[X] = \frac{s}{N}\sum_k \mathrm{Tr}[g^{\rm b}_\mu X]$ is the Hellmann–Feynman derivative of the energy of the
+model, and always
 
-5. **Electronic force constants** (`static_response`, only with `adiabatic_reference = "static"`):
+$$ M_\mu \ddot u_\mu = -\sum_\nu K^{\rm BO}_{\mu\nu}u_\nu - F_\mu\big[\rho-\rho_{\rm BO}\big]
+   \;=\; -\sum_\nu K^{\rm BO}_{\mu\nu}u_\nu - F_\mu[\rho-\rho_0] + \sum_\nu \Pi_{\mu\nu}u_\nu \quad (\text{static}), $$
 
-   $$ \Pi_{\mu\nu} = \frac{s}{N}\sum_k \mathrm{Tr}\big[g^{\rm b}_\mu(k)\,\delta\rho_\nu(k)\big], \qquad \delta\rho_\nu = \chi_0\big(g^{\rm b}_\nu + \Sigma[\delta\rho_\nu]\big), $$
-
-   symmetrized as $(\Pi+\Pi^\dagger)/2$. $\delta\rho_\nu = \tilde g_\nu$ from step 4 when it exists (no iterations); otherwise the
-   linear fixed point is solved by Anderson mixing (one step without the mean field). $\Pi = \frac{s}{N}\sum_k\mathrm{Tr}[g^{\rm b}\chi_0 g^{\rm s}]$
-   is the $\Pi$ of section 3.1, $\mathrm{Tr}[g^{\rm b}\chi\, g^{\rm b}]$, since $\chi g^{\rm b} = \chi_0 g^{\rm s}$. The force constants of the dynamics are
-
-   $$ K^0 = K^{\rm BO} - \Pi . $$
-
-During the propagation (sections 3 and 5) the Hamiltonian is $H = H_e + \sum_\mu u_\mu g^{\rm b}_\mu$ and the force
-$F_\mu[X] = \frac{s}{N}\sum_k \mathrm{Tr}[g^{\rm b}_\mu X]$ is the Hellmann–Feynman derivative of the energy of the model, so
-
-$$ M_\mu \ddot u_\mu = -\sum_\nu K^0_{\mu\nu}u_\nu - F_\mu[\rho-\rho_0]
-   \;=\; -\sum_\nu K^{\rm BO}_{\mu\nu}u_\nu - F_\mu\big[\rho-\rho_0-\Delta\rho^{\rm BO}(u)\big], $$
-
-using $F_\mu[\Delta\rho^{\rm BO}(u)] = \sum_\nu \Pi_{\mu\nu}u_\nu$: only the part of $\rho$ beyond the adiabatic response pushes the atoms,
-with the force constants of ph.x. In the static limit $\rho-\rho_0 \to \Delta\rho^{\rm BO}(u)$ and the frequencies are those of ph.x.
+only the part of $\rho$ beyond the adiabatic response pushes the atoms, with the force constants of ph.x. In the static
+limit $\rho \to \rho_{\rm BO}(u)$ and the frequencies are those of ph.x. The conserved energy (exactly only with $g^{\rm b}$ alone)
+is $s E[\rho] + u\cdot F[\rho-\rho_0] - \tfrac12 u\cdot\Pi\cdot u + E_{\rm lattice}(K^{\rm BO})$, with $E[\rho]$ the band and mean-field energy
+with $\Sigma[\rho-\rho_0]$.
 
 Check on hBN from QE/EPW (2 $p_z$ Wannier functions, no mean field, `static`): the static limit gives E′ at
 1349.59 cm⁻¹ against 1349.53 of ph.x, the energy is conserved to 3·10⁻⁹ and the center of mass stays at rest (5·10⁻¹⁴ bohr).
@@ -259,12 +259,13 @@ A quasiparticle gap in $H_0$ (scissor or KCW) or ε > 1 is needed there.
 
 ## 4. Where the coupling comes from
 
-Both routes below give the screened coupling $g^{\rm s}$ of DFT, from which EDUS removes the screening of the
-model at the beginning (section 3.2).
+Both routes below give the screened coupling $g^{\rm s}$ of DFT (`epw_directory_screened`), or the bare one with the
+modifications of section 3.2 (`epw_directory`).
 
 1. **EPW**: `epmatwp` gives $g$ in the Wannier representation $g(R_e, R_p)$; for q = 0, sum over $R_p$
    and rotate to the mode basis. Needs the same Wannier functions of the tb model.
-   EPW uses `dvscf`, i.e. the **screened** coupling $g^{\rm s}$: use `coupling = "screened"`.
+   Standard EPW uses `dvscf`, i.e. the **screened** coupling $g^{\rm s}$; the local build has `bare_only = .TRUE.`
+   (section 3.2) and gives the fully bare one.
    Workflow tested on hBN (EPW 6.1):
    1. `pw.x` scf, `ph.x` at Γ only with `fildvscf`, then `pp.py` to collect `save/`;
    2. `pw.x` scf and nscf on the full k grid as an explicit list, **without `nosym`/`noinv`** (EPW 6.1 allocates
@@ -279,7 +280,7 @@ model at the beginning (section 3.2).
    $$ g_\nu(R) = \ell_\nu\,\frac{H^W(R;+\delta Q_\nu) - H^W(R;-\delta Q_\nu)}{2\,\delta Q_\nu} $$
    The Wannier gauge must be the same in the three calculations (same projections, no
    disentanglement changes), otherwise the finite difference mixes gauge and physics.
-   A self-consistent frozen phonon gives the screened $g^{\rm s}$, as EPW (`coupling = "screened"`).
+   A self-consistent frozen phonon gives the screened $g^{\rm s}$, as standard EPW.
 
 ## 5. Implementation in EDUS
 
@@ -298,11 +299,12 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
   is moved to the grid of the simulation like $H_0$ (dft on the k grid, fft to R). The Hamiltonian of EPW is compared
   with the one of `tb_file` (`max|H_EPW - H_tb|` in the recap): they must be the same Wannier functions.
   Masses and $K$ from the dynamical matrix of ph.x at Γ (`DynamicalMatrix.hpp`, text format).
-- **Bare vs BO force constants** (sections 3.1 and 3.3): ph.x gives $K^{\rm BO} = K^0 + \Pi$, and with $K^{\rm BO}$ only
-  $\rho-\rho_0-\Delta\rho^{\rm BO}(u)$ must push the atoms. Option `adiabatic_reference`:
-  - `none`: $\Delta\rho^{\rm BO}=0$ with $K^{\rm BO}$ (the response is counted twice);
-  - `static` (default): $\Delta\rho^{\rm BO}(u) = \sum_\mu u_\mu\tilde g_\mu$ with the static response of the model (section 3.3, steps 4–5),
-    implemented as $K^0 = K^{\rm BO}-\Pi$ with the whole $\rho-\rho_0$ in the force (identical). The lattice keeps the
+- **Couplings** (section 3.2): `epw_directory` = $g^{\rm b}$ (force, and $H$ if alone), `epw_directory_screened` = $g^{\rm s}$
+  (optional: then $H$ has $u\cdot g^{\rm s}$ and $\Sigma[\rho-\rho_{\rm BO}]$).
+- **BO force constants** (sections 3.1 and 3.3): the dynamics always uses $K^{\rm BO}$ of ph.x, and only
+  $\rho-\rho_{\rm BO}(u)$ pushes the atoms. Option `adiabatic_reference`:
+  - `static` (default): $\rho_{\rm BO}(u) = \rho_0 + \sum_\mu u_\mu\delta\rho_\mu$ with the static response of the model (section 3.3,
+    step 5); the force is $F[\rho-\rho_0]-\Pi u$. The lattice keeps the
     non-adiabatic part of the response: $M\omega^2 = K^{\rm BO}+\Pi(\omega)-\Pi(0)$, the non-adiabatic phonons of
     Lazzeri and Mauri, PRL 97, 266407 (2006), and Calandra, Profeta and Mauri, PRB 82, 165111 (2010);
   - `dynamic`: $\rho_{\rm BO}$ is propagated with the same equation of $\rho$ (mean field, $u(t)$, decay), without the laser, and
@@ -313,7 +315,7 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
     The conserved energy is $E[\rho]-E[\rho_{\rm BO}]+E_{\rm lattice}(K^{\rm BO})$, with $E[\rho]$ the electronic energy including
     the coupling $u\cdot F[\rho]$; it changes only because of the work of the field.
 
-  Check of the three options on a two-level model independent of EDUS ($H_0 + u\,g$, gap 1, $\omega_{\rm BO}=0.2$,
+  Check of the options (`none` = $K^{\rm BO}$ with $\rho-\rho_0$, removed since it counts the response twice) on a two-level model independent of EDUS ($H_0 + u\,g$, gap 1, $\omega_{\rm BO}=0.2$,
   RK4), frequencies against the roots of $M\omega^2 = K_{\rm eff}(\omega)$:
 
   | reference | $K_{\rm eff}(\omega)$ | f = 0: simulated / predicted | f = 0.1: simulated / predicted |
@@ -329,7 +331,8 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
   $\omega/\omega_{\rm ph.x}-1 = -2.0\cdot10^{-3} + 1.15\cdot10^{3}\,u_0^2$ ($u_0$ in Å, from 0.0002 to 0.005 Å; the same with
   dt = 0.02 and 0.04 fs). The linear limit is the non-adiabatic softening; the $u_0^2$ term is the anharmonicity of the
   electronic energy of the model, amplified because for A1' $\Pi = -6.6\,K^{\rm BO}$ (the bare $K^0$ alone gives
-  1092 cm⁻¹). With `dynamic` the frequency is exact at any amplitude. Use small displacements to check the static limit.
+  1092 cm⁻¹). Those files come from the local EPW with `bare_only` (section 3.2), i.e. the fully bare coupling without the
+  screening of the bands outside the model, which likely explains the huge $\Pi$. With `dynamic` the frequency is exact at any amplitude. Use small displacements to check the static limit.
 
   Not included: the second-order coupling $\frac12 u_\mu u_\nu\,\mathrm{Tr}[\partial^2H/\partial u_\mu\partial u_\nu\,(\rho-\rho_0)]$
   (Debye–Waller-like), which also changes the frequency with excited carriers; the ions are classical at q = Γ
@@ -339,13 +342,16 @@ What is implemented (q = Γ only, RK and AB solvers, CPU):
   the ρ inside it. Without phonons the propagation is the one of before (`DESolver<Operator>`, also Magnus).
 - **Propagator**: `build_hamiltonian` adds $\sum_\mu u_\mu g_\mu(R)$ to H(R) after the self energy (before the Peierls phase)
   and computes $F_\mu$ in R from the physical ρ (Peierls phase removed), reduced over the ranks.
-- **Output** (`Lattice.txt`): $E_{\rm lattice}$, $u\cdot F$, $u_\mu$, $\dot u_\mu$, $F_\mu$. The velocity includes
-  $\nabla_k(u\cdot g) + i[u\cdot g, r]$ and `Energy.txt` includes $E_{\rm ph} = (E_{\rm lattice} + u\cdot F)/s$, so that
-  $E - E(0) = W$ holds also with phonons.
+- **Output** (`Lattice.txt`): $E_{\rm lattice}$ (with $K^{\rm BO}$), $E_{\rm coupling} = u\cdot F[\rho-\rho_0] - E_{\rm BO}$ ($\tfrac12 u\Pi u$ static,
+  $E[\rho_{\rm BO}]$ dynamic), $u_\mu$, $\dot u_\mu$, $F_\mu[\rho-\rho_{\rm BO}]$ (the force of the dynamics). The velocity includes
+  $\nabla_k(u\cdot g) + i[u\cdot g, r]$ with the Hamiltonian actually propagated, and `Energy.txt` includes
+  $E_{\rm ph} = (E_{\rm lattice} + E_{\rm coupling})/s$, so that $E - E(0) = W$ holds also with phonons.
 - **Tests** (`tb_models/hBN_synthetic_epw`, written by `utility/make_synthetic_epw.py`: hopping $t(d)=t_0e^{-\beta(d/d_0-1)}$,
   spring constants for 1370 and 800 cm⁻¹): `hBN_phonons_static` and `hBN_HSEX_phonons_static` (no laser, static
   reference: the static limit gives back the frequency of the dynamical matrix in IPA and with the mean field, energy
-  conserved) and `hBN_HSEX_phonons` (laser + mean field, dynamic reference, energy balance). The synthetic coupling has
+  conserved), `hBN_HSEX_phonons` (laser + mean field, dynamic reference, energy balance), `hBN_phonons_screened`
+  (the same file as $g^{\rm b}$ and $g^{\rm s}$, IPA: identical to `hBN_phonons_static`) and `hBN_HSEX_phonons_screened` (the same with
+  the mean field: regression only, the synthetic $g^{\rm s}$ is not consistent with the mean field and the energy drifts). The synthetic coupling has
   $\sum_\kappa g_\kappa = 0$ by construction (it depends only on bond lengths), so it does not test step 3 of section 3.3;
   the QE → EPW → EDUS run on hBN of section 4 does.
   Real EPW data: `tb_models/MoS2_PBE_epw` (monolayer MoS2, PBE, 11 Wannier functions, see its README) for

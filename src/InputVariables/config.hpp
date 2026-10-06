@@ -475,6 +475,8 @@ class config_t
         bool enabled() const { return dict_.at("enabled").get<bool>(); }
         std::string epw_directory() const { return dict_.at("epw_directory").get<std::string>(); }
         std::string epmatwp() const { return dict_.at("epmatwp").get<std::string>(); }
+        std::string epw_directory_screened() const { return dict_.at("epw_directory_screened").get<std::string>(); }
+        std::string epmatwp_screened() const { return dict_.at("epmatwp_screened").get<std::string>(); }
         std::string dyn_file() const { return dict_.at("dyn_file").get<std::string>(); }
         std::vector<std::vector<double>> qpoints() const { return dict_.at("qpoints").get<std::vector<std::vector<double>>>(); }
         double spin_degeneracy() const { return dict_.at("spin_degeneracy").get<double>(); }
@@ -483,7 +485,6 @@ class config_t
         std::string damping_time_units() const { return dict_.at("damping_time_units").get<std::string>(); }
         void damping_time_units(std::string units__) { dict_["damping_time_units"] = units__; }
         double coupling_scale() const { return dict_.at("coupling_scale").get<double>(); }
-        std::string coupling() const { return dict_.at("coupling").get<std::string>(); }
         bool acoustic_sum_rule() const { return dict_.at("acoustic_sum_rule").get<bool>(); }
         std::string adiabatic_reference() const { return dict_.at("adiabatic_reference").get<std::string>(); }
         std::vector<double> initial_displacement() const { return dict_.at("initial_displacement").get<std::vector<double>>(); }

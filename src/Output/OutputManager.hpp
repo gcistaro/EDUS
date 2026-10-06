@@ -43,6 +43,8 @@ class OutputManager
         /// Workspace for the energy balance: self energy and its gradient
         Operator<std::complex<double>> sigma_;
         Operator<std::complex<double>> grad_sigma_;
+        /// rho_BO of the static adiabatic reference (with phonons), for the force on the lattice
+        Operator<std::complex<double>> rho_bo_;
         /// Energy balance: work done by the field up to the last print step, and power and time at that step
         double work_ = 0.;
         double last_power_ = 0.;

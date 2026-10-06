@@ -38,7 +38,6 @@
       "enabled": true,
       "epw_directory": "../../tb_models/hBN_synthetic_epw",
       "dyn_file": "../../tb_models/hBN_synthetic_epw/hbn.dyn1",
-      "coupling": "bare",
       "adiabatic_reference": "dynamic",
       "damping_time": 100,
       "damping_time_units": "fs"

@@ -50,6 +50,9 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
             y.rho_bo.initialize_fft(y.rho, "rho_BO");
             initial_condition(y.rho_bo);
         }
+        else {
+            rho_bo_static_.initialize_fft(state_->DensityMatrix(), "rho_BO_static");
+        }
         /* the time stepper needs an EquationOfMotion<EhrenfestState>: a lambda calling derivative(EhrenfestState).
            Propagator itself is the EquationOfMotion<Operator> of the propagation without phonons */
         ehrenfest_equation_ = std::make_unique<FunctionEquation<EhrenfestState>>(
@@ -184,20 +187,24 @@ void Propagator::derivative(Operator<std::complex<double>>& Output__, const doub
 ///
 /// Called by the time stepper at each stage (4 times per step with RK4), with Input__ = (rho, u, du/dt[, rho_BO])
 /// at that stage. The steps are:
-/// 1. d(rho)/dt with H = H0 + E.r + Sigma[rho] + u.g; while building H, build_hamiltonian also computes the force
-///    of rho on the lattice (in force_), with respect to reference_;
+/// 0. rho_BO at this stage: built from u with the static reference, part of Input__ with the dynamic one;
+/// 1. d(rho)/dt with H = H0 + E.r + Sigma + u.g; while building H, build_hamiltonian also computes the force
+///    of rho - rho_BO on the lattice (in force_);
 /// 2. only with the dynamic reference: d(rho_BO)/dt with the same u but without the laser;
 /// 3. du/dt = v, dv/dt = -(K u + F)/M with the force of step 1.
 /// The order matters: the force must be computed before the lattice derivative, and the shared workspaces of the
 /// state (H, aux_DM) are overwritten by each call of derivative_electrons.
 void Propagator::derivative(EhrenfestState& Output__, const double& time__, const EhrenfestState& Input__)
 {
-    /* the force is computed with the physical rho in build_hamiltonian, with respect to rho0 or to rho_BO.
-       rho_BO is needed in R there: align its R component with the k one (updated by the time stepper) */
-    reference_ = &system_->DM0();
+    /* the force is computed with the physical rho in build_hamiltonian, with respect to rho_BO, needed in R there.
+       Dynamic reference: align the R component of rho_BO with the k one (updated by the time stepper) */
     if( Input__.with_reference ) {
         const_cast<Operator<std::complex<double>>&>(Input__.rho_bo).go_to_R(true);
         reference_ = &Input__.rho_bo;
+    }
+    else {
+        lattice_->adiabatic_density(rho_bo_static_, Input__.lattice, system_->DM0());
+        reference_ = &rho_bo_static_;
     }
     derivative_electrons(Output__.rho, time__, Input__.rho, &Input__.lattice, true);
     /* rho_BO: same displacements, no laser */
@@ -288,10 +295,19 @@ void Propagator::build_hamiltonian(const double& time__, const Operator<std::com
         apply_peierls_phase(aux_DM_, time__, -1, processor_);
     }
     auto& DM = peierls ? aux_DM_ : DM__;
-    meanfield_->self_energy(H_, DM, system_->DM0());
+    /* with the screened coupling of EPW the static screening is already in u.g_s: the mean field acts only on
+       rho - rho_BO (for rho_BO itself, propagated without field, it is zero). Otherwise Sigma[rho - rho0] */
+    if( lattice__ && lattice_->screened() ) {
+        if( with_field__ ) {
+            meanfield_->self_energy(H_, DM, *reference_);
+        }
+    }
+    else {
+        meanfield_->self_energy(H_, DM, system_->DM0());
+    }
 
     /* lattice: H_ += sum_mu u_mu g_mu, and force of the (physical) density matrix on the lattice, with respect to
-       the reference (rho0, or rho_BO in the dynamic reference). rho_BO (no field) exerts no force of its own */
+       rho_BO. rho_BO (no field) exerts no force of its own */
     if( lattice__ ) {
         lattice_->add_coupling(H_, *lattice__);
         if( with_field__ ) {

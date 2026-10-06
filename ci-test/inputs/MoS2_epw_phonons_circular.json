@@ -51,7 +51,6 @@
         "enabled": true,
         "epw_directory": "../../tb_models/MoS2_PBE_epw",
         "dyn_file": "../../tb_models/MoS2_PBE_epw/mos2.dyn1",
-        "coupling": "screened",
         "adiabatic_reference": "static"
     }
 }

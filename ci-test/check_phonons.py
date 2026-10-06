@@ -3,8 +3,9 @@ Analytic checks of the Ehrenfest dynamics of the lattice (Output/Lattice.txt and
 
 1. Without work of the field the total energy (electrons + lattice + coupling) is conserved:
    max|E - E(0)| must be small compared with the energy of the lattice (both per spin channel in Energy.txt).
-2. With "adiabatic_reference": "static" or "dynamic" only the excited electrons push the atoms, and the force
-   constants are those of ph.x: small oscillations started from "initial_displacement" must have a frequency of the
+   With the screened coupling (epw_directory_screened) and the mean field it is conserved only if
+   g_b = g_s - Sigma[chi0 g_s], which synthetic data do not satisfy: then the drift is only printed.
+2. Only the excited electrons, rho - rho_BO, push the atoms, and the force constants are those of ph.x: small oscillations started from "initial_displacement" must have a frequency of the
    dynamical matrix of ph.x (static limit; with "static" the non-adiabatic correction is of order (omega/gap)^2,
    with "dynamic" and no laser rho = rho_BO and the frequency is exact).
 
@@ -90,6 +91,9 @@ if np.abs(energy[:, 5]).max() < 1.e-300:
     drift = np.abs(energy[:, 3]).max()
     if scale < 1.e-300:
         print(f"[OK] lattice energy: no work and lattice at rest, max|E - E(0)| = {drift:.2e}")
+    elif phonons.get("epw_directory_screened") and inp.get("coulomb", False):
+        print(f"[INFO] lattice energy (screened coupling with mean field, not conserved): "
+              f"max|E - E(0)| / max(E_lattice) = {drift / scale:.2e}")
     elif drift / scale > args.energy_tolerance:
         print(f"[FAIL] lattice energy: max|E - E(0)| / max(E_lattice) = {drift / scale:.2e} > {args.energy_tolerance:.1e}")
         failures += 1
@@ -97,7 +101,7 @@ if np.abs(energy[:, 5]).max() < 1.e-300:
         print(f"[OK] lattice energy: max|E - E(0)| / max(E_lattice) = {drift / scale:.2e}")
 
 # 2. static limit
-if phonons.get("adiabatic_reference", "static") in ("static", "dynamic") and phonons.get("initial_displacement"):
+if phonons.get("initial_displacement"):
     dyn = phonons["dyn_file"]
     if not os.path.isabs(dyn):
         dyn = os.path.join(os.getcwd(), dyn)
@@ -115,10 +119,10 @@ if phonons.get("adiabatic_reference", "static") in ("static", "dynamic") and pho
     else:
         print(f"[OK] static limit: frequency {w:.3f} cm^-1, dynamical matrix {expected:.3f} cm^-1 (error {error:.1e})")
 
-# 3. projection on the normal modes of ph.x: with the force constants of ph.x in the dynamics (reference none or
-#    dynamic) the energies of the modes add up to E_lattice
+# 3. projection on the normal modes of ph.x: the dynamics uses the force constants of ph.x, so the energies of the
+#    modes add up to E_lattice
 modes_file = os.path.join(args.output_dir, "Phonon_modes.txt")
-if os.path.exists(modes_file) and phonons.get("adiabatic_reference", "static") in ("none", "dynamic"):
+if os.path.exists(modes_file):
     modes = np.loadtxt(modes_file, ndmin=2)
     energy_modes = modes[:, 1 + 3 * nmodes:1 + 4 * nmodes].sum(axis=1)
     scale = max(np.abs(lattice[:, 1]).max(), 1.e-300)

@@ -35,6 +35,9 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     /* workspace for the energy balance */
     sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "Sigma_energy");
     grad_sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "grad_Sigma_energy");
+    if( propagator_->lattice() && propagator_->lattice()->static_reference() ) {
+        rho_bo_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "rho_BO_output");
+    }
 
     std::filesystem::create_directories(parameters_.directory);
     mpi::Communicator::world().barrier();
@@ -68,13 +71,15 @@ void OutputManager::initialize(const OutputParameters& parameters__,
             os_lattice_.open(path("Lattice.txt"));
             bool dynamic = lattice->dynamic_reference();
             os_lattice_ << "# Lattice at q = 0, atomic units, per unit cell (all spin channels), adiabatic reference: "
-                        << phonon::to_string(lattice->parameters().adiabatic_reference) << "\n"
+                        << phonon::to_string(lattice->parameters().adiabatic_reference)
+                        << (lattice->screened() ? ", electrons with g_s and Sigma[rho - rho_BO]" : ", electrons with g_b and Sigma[rho - rho0]") << "\n"
                         << "# mu = 3*atom + direction (cartesian), u = displacement (bohr), du/dt (bohr/a.u.),\n"
-                        << "# F = force of the electrons used in the dynamics, s/N sum_k Tr[g_mu (rho - " << (dynamic ? "rho_BO" : "rho0")
-                        << ")] (Ha/bohr): the atoms feel -F\n"
-                        << "# E_lattice = kinetic + harmonic energy (force constants used in the dynamics)\n"
+                        << "# F = force of the electrons used in the dynamics, s/N sum_k Tr[g_b,mu (rho - rho_BO)]"
+                        << (dynamic ? "" : " = F[rho - rho0] - Pi u") << " (Ha/bohr): the atoms feel -F\n"
+                        << "# E_lattice = kinetic + harmonic energy (force constants of ph.x)\n"
                         << (dynamic ? "# E_coupling = u.F[rho - rho0] - E[rho_BO], E[rho_BO] = energy of rho_BO including its coupling\n"
-                                    : "# E_coupling = u.F\n")
+                                    : "# E_coupling = u.F[rho - rho0] - 1/2 u.Pi.u\n")
+                        << (lattice->screened() ? "# (with g_s the energy is the one of the bare model, conserved only if g_b = g_s - Sigma[chi0 g_s])\n" : "")
                         << "# columns: time, E_lattice, E_coupling, u_mu (" << nmodes << "), du_mu/dt (" << nmodes << "), F_mu ("
                         << nmodes << ")\n";
 
@@ -291,29 +296,38 @@ void OutputManager::print_velocity_energy(const double& time__)
     }
     local[6] = trace_product_difference(system_->H0().get_Operator(Space::k), rho, rho0);
 
-    /* forces on the lattice: of rho - rho0 (force_full), of rho_BO - rho0 and of rho - rho_BO (dynamic reference) */
+    /* forces on the lattice (with g_b): of rho - rho0 (force_full), of rho - rho_BO (force_excited, the one of the
+       dynamics) and of rho_BO - rho0 (dynamic reference) */
     auto* lattice = propagator_->lattice();
     const bool dynamic = lattice && lattice->dynamic_reference();
+    const bool screened = lattice && lattice->screened();
     std::vector<double> force_full, force_bo, force_excited;
+    const Operator<std::complex<double>>* rho_bo = nullptr;
     if( lattice ) {
         aux.go_to_R();
         force_full = lattice->force(aux, system_->DM0());
-    }
-    if( dynamic ) {
-        auto& rho_bo = state_->variables().rho_bo;
-        rho_bo.lock_space(Space::k);
-        rho_bo.go_to_R();
-        force_bo = lattice->force(rho_bo, system_->DM0());
-        force_excited = lattice->force(aux, rho_bo);
-        local[8] = trace_product_difference(system_->H0().get_Operator(Space::k), rho_bo.get_Operator(Space::k), rho0);
+        if( dynamic ) {
+            auto& rho_bo_dynamic = state_->variables().rho_bo;
+            rho_bo_dynamic.lock_space(Space::k);
+            rho_bo_dynamic.go_to_R();
+            force_bo = lattice->force(rho_bo_dynamic, system_->DM0());
+            local[8] = trace_product_difference(system_->H0().get_Operator(Space::k), rho_bo_dynamic.get_Operator(Space::k), rho0);
+            rho_bo = &rho_bo_dynamic;
+        }
+        else {
+            lattice->adiabatic_density(rho_bo_, state_->lattice(), system_->DM0());
+            rho_bo = &rho_bo_;
+        }
+        force_excited = lattice->force(aux, *rho_bo);
     }
     if( meanfield_->parameters().enabled || lattice ) {
-        /* self energy Sigma[rho-rho0] + sum_mu u_mu g_mu, computed in R like in the propagation */
+        /* self energy + sum_mu u_mu g_mu, computed in R like in the propagation: Sigma[rho-rho0] + u.g_b, or
+           Sigma[rho-rho_BO] + u.g_s with the screened coupling */
         sigma_.get_Operator(R).fill(0.);
         sigma_.lock_space(R);
         aux.go_to_R();
         if( meanfield_->parameters().enabled ) {
-            meanfield_->self_energy(sigma_, aux, system_->DM0());
+            meanfield_->self_energy(sigma_, aux, screened ? *rho_bo : system_->DM0());
         }
         if( lattice ) {
             lattice->add_coupling(sigma_, state_->lattice());
@@ -339,15 +353,25 @@ void OutputManager::print_velocity_energy(const double& time__)
             grad_sigma_.go_to_k();
             local[3 + ix] += trace_product(grad_sigma_.get_Operator(Space::k), rho);
         }
+        /* with the screened coupling the energy is the one of the bare model: E_MF with Sigma[rho - rho0] only */
+        if( screened ) {
+            local[7] = 0.;
+            if( meanfield_->parameters().enabled ) {
+                sigma_.get_Operator(R).fill(0.);
+                sigma_.lock_space(R);
+                meanfield_->self_energy(sigma_, aux, system_->DM0());
+                sigma_.go_to_k();
+                local[7] = trace_product_difference(sigma_.get_Operator(Space::k), rho, rho0);
+            }
+        }
     }
     /* mean-field energy of rho_BO */
     if( dynamic && meanfield_->parameters().enabled ) {
-        auto& rho_bo = state_->variables().rho_bo;
         sigma_.get_Operator(R).fill(0.);
         sigma_.lock_space(R);
-        meanfield_->self_energy(sigma_, rho_bo, system_->DM0());
+        meanfield_->self_energy(sigma_, *rho_bo, system_->DM0());
         sigma_.go_to_k();
-        local[9] = trace_product_difference(sigma_.get_Operator(Space::k), rho_bo.get_Operator(Space::k), rho0);
+        local[9] = trace_product_difference(sigma_.get_Operator(Space::k), rho_bo->get_Operator(Space::k), rho0);
     }
     if( dynamic ) {
         /* the propagation aligns the R component again from k */
@@ -389,7 +413,10 @@ void OutputManager::print_velocity_energy(const double& time__)
            where u.F = s/N sum_k Tr[u.g (rho - rho0)] is the energy of the coupling. Energy.txt is per spin channel,
            so the lattice terms are divided by s: E = E_band + E_MF + (E_lattice + E_coupling)/s.
            sigma_ was built as Sigma + u.g (for the velocity), so local[7] = Tr[(Sigma + u.g)(rho - rho0)] contains
-           also Tr[u.g (rho - rho0)] = N u.F/s: it is removed from E_MF here */
+           also Tr[u.g (rho - rho0)] = N u.F/s: it is removed from E_MF here (with the screened coupling local[7] was
+           computed again with Sigma[rho - rho0] only).
+           The adiabatic response, already in the force constants of ph.x, is removed from E_coupling: 1/2 u.Pi.u with
+           the static reference, E[rho_BO] with the dynamic one */
         auto& x = state_->lattice();
         double s = lattice->parameters().spin_degeneracy;
         auto dot_u = [&](const std::vector<double>& F__) {
@@ -400,7 +427,9 @@ void OutputManager::print_velocity_energy(const double& time__)
             return sum;
         };
         double coupling = dot_u(force_full);
-        energy_mf -= 0.5 * coupling / s;
+        if( !screened ) {
+            energy_mf -= 0.5 * coupling / s;
+        }
         /* dynamic reference: the lattice is pushed by rho - rho_BO with K_BO, and the conserved energy is
            E[rho] - E[rho_BO] + E_lattice, with the energy of rho_BO
            E[rho_BO] = s (Tr[H0 (rho_BO-rho0)] + 1/2 Tr[Sigma (rho_BO-rho0)])/N + u.F[rho_BO].
@@ -408,8 +437,11 @@ void OutputManager::print_velocity_energy(const double& time__)
         if( dynamic ) {
             coupling -= s * (local[8].real() + 0.5 * local[9].real()) / num_k + dot_u(force_bo);
         }
+        else {
+            coupling -= lattice->adiabatic_energy(x);
+        }
         /* Lattice.txt has the force that pushes the atoms in the dynamics */
-        auto& force = dynamic ? force_excited : force_full;
+        auto& force = force_excited;
         double energy_lattice = lattice->energy(x);
         energy = energy_band + energy_mf + (energy_lattice + coupling) / s;
 

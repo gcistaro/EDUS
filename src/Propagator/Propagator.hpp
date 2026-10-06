@@ -36,8 +36,12 @@ class Propagator : public CommutatorEquation
         const phonon::Lattice* lattice_ = nullptr;
         /// Force of the electrons on the lattice, computed with the last Hamiltonian
         std::vector<double> force_;
-        /// Density matrix with respect to which the force is computed: rho0, or rho_BO in the dynamic reference
+        /// Adiabatic density matrix rho_BO at the current stage: the force on the lattice is the one of rho - rho_BO,
+        /// and with the screened coupling the mean field is Sigma[rho - rho_BO]. It points to rho_bo_static_ or to the
+        /// rho_BO propagated in the state (dynamic reference)
         const Operator<std::complex<double>>* reference_ = nullptr;
+        /// rho_BO = rho0 + u.delta rho of the static reference, built at each stage
+        Operator<std::complex<double>> rho_bo_static_;
         /// Gradient in k, shared with System (used for the velocity)
         const kGradient* kgradient_ = nullptr;
         /// R grid centered in Gamma, used for the Peierls phase

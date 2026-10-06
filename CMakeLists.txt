@@ -373,10 +373,12 @@ set_tests_properties(hBN_HSEX_np4 LiF_HSEX_np4 PROPERTIES ENVIRONMENT "OMP_NUM_T
 # (tb_models/hBN_synthetic_epw, from utility/make_synthetic_epw.py): static limit without laser with the
 # static adiabatic reference (IPA and HSEX: the static response of the electrons must give back the frequency of
 # ph.x), coherent phonons driven by the laser with the mean field and the dynamic adiabatic reference, and the
-# unscreening of the coupling (coupling = screened) with the static reference
+# screened coupling (epw_directory_screened, here the same file as the bare one): without mean field it must give
+# exactly hBN_phonons_static, with HSEX it is only a regression test
 add_test(NAME hBN_phonons_static      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_phonons_static      2)
 add_test(NAME hBN_HSEX_phonons_static COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_static 2)
 add_test(NAME hBN_HSEX_phonons        COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons        2)
+add_test(NAME hBN_phonons_screened      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_phonons_screened      2)
 add_test(NAME hBN_HSEX_phonons_screened COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_screened 2)
 # Ehrenfest dynamics with the real output of QE/EPW for monolayer MoS2 (tb_models/MoS2_PBE_epw: PBE, 11 Wannier
 # functions Mo d + S p, coupling at q = 0, 6x6 grid): A1' displaced without laser with the dynamic reference (the

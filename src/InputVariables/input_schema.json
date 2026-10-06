@@ -253,12 +253,22 @@
                 "epw_directory": {
                     "type": "string",
                     "default": "./epw",
-                    "title": "Directory of the EPW calculation (epwwrite = .true.) with epwdata.fmt, wigner.fmt, crystal.fmt and prefix.epmatwp. The Wannier functions must be the ones of tb_file"
+                    "title": "Directory of the EPW calculation (epwwrite = .true.) of the bare coupling g_b, with epwdata.fmt, wigner.fmt, crystal.fmt and prefix.epmatwp. The Wannier functions must be the ones of tb_file. g_b gives the force on the atoms, and it is the coupling felt by the electrons if epw_directory_screened is empty"
                 },
                 "epmatwp": {
                     "type": "string",
                     "default": "",
                     "title": "Name of the file prefix.epmatwp in epw_directory; if empty, the only *.epmatwp file of the directory"
+                },
+                "epw_directory_screened": {
+                    "type": "string",
+                    "default": "",
+                    "title": "Directory of the EPW calculation of the screened coupling g_s (optional, same Wannier functions). If given, the electrons feel u.g_s and the mean field of rho - rho_BO (the static screening is already in g_s); if empty, they feel u.g_b and the mean field of rho - rho0"
+                },
+                "epmatwp_screened": {
+                    "type": "string",
+                    "default": "",
+                    "title": "Name of the file prefix.epmatwp in epw_directory_screened; if empty, the only *.epmatwp file of the directory"
                 },
                 "dyn_file": {
                     "type": "string",
@@ -290,15 +300,6 @@
                     ],
                     "title": "Units of damping_time"
                 },
-                "coupling": {
-                    "type": "string",
-                    "default": "screened",
-                    "enum": [
-                        "screened",
-                        "bare"
-                    ],
-                    "title": "Electron-phonon coupling in the files of EPW: screened = standard EPW run, the screening of the electrons of the model (generated again by the mean field) is removed at the beginning, g_b = g_s - Sigma[chi0 g_s]; bare = used as it is"
-                },
                 "coupling_scale": {
                     "type": "number",
                     "default": 1.0,
@@ -313,11 +314,10 @@
                     "type": "string",
                     "default": "static",
                     "enum": [
-                        "none",
                         "static",
                         "dynamic"
                     ],
-                    "title": "Adiabatic (Born-Oppenheimer) response of the electrons removed from the force on the atoms, since the force constants of ph.x already contain it: static (recommended) = static linear response of the electrons of the model (mean field included), computed at the beginning, i.e. force constants K - Pi(0), which keeps the non-adiabatic correction Pi(omega) - Pi(0); dynamic = density matrix propagated with the same displacements and no laser (removes also the non-adiabatic correction of the ground state); none = nothing removed (the response is counted twice)"
+                    "title": "Adiabatic (Born-Oppenheimer) density matrix rho_BO(u): the force constants of ph.x already contain the static screening of the atoms by the electrons, so only rho - rho_BO pushes the atoms. static (recommended) = rho0 + static linear response of the electrons of the model to u, computed at the beginning (keeps the non-adiabatic correction Pi(omega) - Pi(0)); dynamic = density matrix propagated with the same displacements and no laser (removes also the non-adiabatic correction of the ground state)"
                 },
                 "initial_displacement": {
                     "type": "array",

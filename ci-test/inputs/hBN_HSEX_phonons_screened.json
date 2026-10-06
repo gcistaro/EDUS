@@ -37,8 +37,8 @@
     {
       "enabled": true,
       "epw_directory": "../../tb_models/hBN_synthetic_epw",
+      "epw_directory_screened": "../../tb_models/hBN_synthetic_epw",
       "dyn_file": "../../tb_models/hBN_synthetic_epw/hbn.dyn1",
-      "coupling": "screened",
       "adiabatic_reference": "static",
       "initial_displacement": [0, 0, 0, 0.01, 0, 0],
       "initial_displacement_units": "angstrom"

@@ -42,7 +42,6 @@ def base_input(sim):
             "enabled": True,
             "epw_directory": os.path.join(sim, "epw"),
             "dyn_file": os.path.join(sim, "phonon", "hbn.dyn1"),
-            "coupling": "screened",
             "adiabatic_reference": "static",
             "initial_displacement": DISPLACEMENT,
             "initial_displacement_units": "angstrom",

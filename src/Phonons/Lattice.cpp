@@ -11,11 +11,12 @@
 namespace phonon {
 
 /// @brief Sets up everything the lattice needs during the propagation, in this order:
-/// 1. the electron-phonon coupling g_mu of EPW, moved on the grid of the simulation (read_coupling);
-/// 2. masses and force constants K at Gamma from the dynamical matrix of ph.x; then g without the rigid translation
-///    (remove_translation_from_coupling) and without the screening of the electrons of the model if it is the
-///    screened coupling of a standard EPW run (unscreen_coupling);
-/// 3. with the static adiabatic reference, the static response Pi of the electrons, removed from K.
+/// 1. the electron-phonon couplings of EPW, bare g_b and (optional) screened g_s, moved on the grid of the
+///    simulation (read_coupling);
+/// 2. masses and force constants K_BO at Gamma from the dynamical matrix of ph.x, used as they are in the dynamics;
+///    then g without the rigid translation (remove_translation_from_coupling);
+/// 3. with the static adiabatic reference, the static response delta rho_mu of the electrons, which gives
+///    rho_BO(u) = rho0 + u.delta rho, and Pi.
 /// After this call the class is immutable: during the propagation it only computes H += u.g, forces and energies.
 void Lattice::initialize(const PhononParameters& parameters__, const GridStructure& gridstructure__,
                          const parallel::Decomposition& decomposition__, const electron::System& system__,
@@ -28,8 +29,18 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
     comm_ = &decomposition__.kpool_comm();
     num_bands_ = system__.num_bands();
 
-    /* 1. coupling: sets also num_atoms_ and num_modes_ (= 3 * num_atoms_) */
-    read_coupling(gridstructure__, decomposition__, material__);
+    /* 1. couplings: sets also num_atoms_ and num_modes_ (= 3 * num_atoms_) */
+    read_coupling(parameters_.epw_directory, parameters_.epmatwp, gridstructure__, decomposition__, material__,
+                  coupling_, gauge_check_);
+    if( parameters_.screened() ) {
+        int num_modes = num_modes_;
+        read_coupling(parameters_.epw_directory_screened, parameters_.epmatwp_screened, gridstructure__,
+                      decomposition__, material__, coupling_screened_, gauge_check_screened_);
+        if( num_modes_ != num_modes ) {
+            throw std::runtime_error("The two calculations of EPW (bare and screened coupling) have a different "
+                                     "number of atoms\n");
+        }
+    }
 
     /* 2. masses and force constants at Gamma */
     auto dyn = read_dynamical_matrix(parameters_.dyn_file);
@@ -64,30 +75,32 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
     frequencies_input_ = frequencies(K);
     normal_modes(K, mode_omega2_, mode_vectors_);
 
-    /* the coupling without the rigid translation (it needs the masses), then without the screening of the model */
+    /* the couplings without the rigid translation (it needs the masses) */
     if( parameters_.acoustic_sum_rule ) {
-        remove_translation_from_coupling();
+        translation_coupling_ = remove_translation_from_coupling(coupling_);
+        if( parameters_.screened() ) {
+            translation_coupling_ = std::max(translation_coupling_, remove_translation_from_coupling(coupling_screened_));
+        }
     }
-    if( parameters_.coupling == CouplingType::screened ) {
-        unscreen_coupling(gridstructure__, decomposition__, system__, meanfield__);
+    if( parameters_.screened() ) {
+        screening_mismatch_ = screening_mismatch(gridstructure__, decomposition__, system__, meanfield__);
     }
 
     /* 3. static reference. K of ph.x is Born-Oppenheimer: K_BO = K0 + Pi, with Pi the static screening of the lattice
-       by the electrons. The propagated electrons generate Pi again, so the dynamics must use the bare K0 = K_BO - Pi
-       (equivalently: K_BO, and only the excited part of rho pushes the atoms, see EHRENFEST.md section 5).
-       With the dynamic reference K_BO is used as it is: rho_BO takes care of it during the propagation */
+       by the electrons. The propagated electrons generate Pi again, so only rho - rho_BO pushes the atoms
+       (see EHRENFEST.md section 5): with the static reference rho_BO = rho0 + u.delta rho, and the force is
+       F[rho - rho0] - Pi u. With the dynamic reference rho_BO is propagated together with rho */
     if( parameters_.adiabatic_reference == AdiabaticReference::static_response ) {
-        auto Pi = static_response(gridstructure__, decomposition__, system__, meanfield__);
+        Pi_ = static_response(gridstructure__, decomposition__, system__, meanfield__);
+        /* frequencies of the bare lattice, K0 = K_BO - Pi, only for the recap */
+        mdarray<std::complex<double>, 2> K0({num_modes_, num_modes_});
         for( int mu = 0; mu < num_modes_; ++mu ) {
             for( int nu = 0; nu < num_modes_; ++nu ) {
-                K(mu, nu) -= Pi(mu, nu);
+                K0(mu, nu) = K(mu, nu) - 0.5 * (Pi_(mu, nu) + std::conj(Pi_(nu, mu)));
             }
         }
+        frequencies_bare_ = frequencies(K0);
     }
-    /* gtilde was needed only by static_response */
-    gtilde_.clear();
-    /* frequencies of the force constants actually used, only for the recap (e.g. K0 with the static reference) */
-    frequencies_ = frequencies(K);
 
     /* one matrix per q point; for now only Gamma (index 0) */
     force_constants_.initialize({num_qpoints(), num_modes_, num_modes_});
@@ -113,13 +126,15 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
 /// g(R_e) on the EPW list --dft--> g(k) on the k points of the simulation --fft--> g(R) on the FFT grid.
 /// The Hamiltonian of EPW goes through the same path and is compared with H0: this checks that EPW and the
 /// tight-binding model use the same Wannier functions (same order, same phases), otherwise g is in another gauge.
-void Lattice::read_coupling(const GridStructure& gridstructure__, const parallel::Decomposition& decomposition__,
-                            Material& material__)
+void Lattice::read_coupling(const std::string& directory__, const std::string& epmatwp__,
+                            const GridStructure& gridstructure__, const parallel::Decomposition& decomposition__,
+                            Material& material__, std::vector<Operator<std::complex<double>>>& coupling__,
+                            double& gauge_check__)
 {
-    auto epw = read_epw(parameters_.epw_directory);
+    auto epw = read_epw(directory__);
     if( epw.num_bands != num_bands_ ) {
         std::stringstream ss;
-        ss << "EPW has " << epw.num_bands << " Wannier functions, the tight-binding model " << num_bands_
+        ss << "EPW (" << directory__ << ") has " << epw.num_bands << " Wannier functions, the tight-binding model " << num_bands_
            << ": the electron-phonon coupling must be in the basis of the Wannier functions of the model\n";
         throw std::runtime_error(ss.str());
     }
@@ -137,7 +152,7 @@ void Lattice::read_coupling(const GridStructure& gridstructure__, const parallel
     }
     if( lattice_difference > 1.e-3 ) {
         std::stringstream ss;
-        ss << "The lattice vectors of EPW (crystal.fmt) and of the tight-binding model differ by " << lattice_difference
+        ss << "The lattice vectors of EPW (" << directory__ << "/crystal.fmt) and of the tight-binding model differ by " << lattice_difference
            << " bohr: the R vectors of EPW are in crystal coordinates and would be misplaced\n";
         throw std::runtime_error(ss.str());
     }
@@ -170,22 +185,22 @@ void Lattice::read_coupling(const GridStructure& gridstructure__, const parallel
         auto Hepw = to_k(epw.H);
         auto& Hk = Hepw.get_Operator(Space::k);
         auto& Htb = material__.H.get_Operator(Space::k);
-        gauge_check_ = 0.;
+        gauge_check__ = 0.;
         for( int ik = 0; ik < Hk.get_nblocks(); ++ik ) {
             for( int i = 0; i < num_bands_; ++i ) {
                 for( int j = 0; j < num_bands_; ++j ) {
-                    gauge_check_ = std::max(gauge_check_, std::abs(Hk(ik, i, j) - Htb(ik, i, j)));
+                    gauge_check__ = std::max(gauge_check__, std::abs(Hk(ik, i, j) - Htb(ik, i, j)));
                 }
             }
         }
 #ifdef EDUS_MPI
-        MPI_Allreduce(MPI_IN_PLACE, &gauge_check_, 1, MPI_DOUBLE, MPI_MAX, comm_->communicator());
+        MPI_Allreduce(MPI_IN_PLACE, &gauge_check__, 1, MPI_DOUBLE, MPI_MAX, comm_->communicator());
 #endif
     }
 
     /* g_mu(R_e; q) for q = Gamma: (mode, R_e, band, band), Ha/bohr */
-    auto g = read_epmatwp(parameters_.epw_directory + "/" + parameters_.epmatwp, epw, parameters_.qpoints[0]);
-    coupling_.resize(num_modes_);
+    auto g = read_epmatwp(directory__ + "/" + epmatwp__, epw, parameters_.qpoints[0]);
+    coupling__.resize(num_modes_);
     mdarray<std::complex<double>, 3> values({epw.nrr_k, num_bands_, num_bands_});
     for( int mu = 0; mu < num_modes_; ++mu ) {
         /* coupling_scale allows to switch the coupling off (0) keeping everything else, e.g. for tests */
@@ -205,13 +220,13 @@ void Lattice::read_coupling(const GridStructure& gridstructure__, const parallel
            Both components (k and R) of coupling_[mu] stay available afterwards */
         std::stringstream tag;
         tag << "g_" << mu;
-        coupling_[mu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
-                                     decomposition__.mpindex(), tag.str());
+        coupling__[mu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
+                                      decomposition__.mpindex(), tag.str());
         auto& src = gk.get_Operator(Space::k);
-        std::copy(src.begin(), src.end(), coupling_[mu].get_Operator(Space::k).begin());
-        coupling_[mu].lock_gauge(wannier);
-        coupling_[mu].lock_space(Space::k);
-        coupling_[mu].go_to_R();
+        std::copy(src.begin(), src.end(), coupling__[mu].get_Operator(Space::k).begin());
+        coupling__[mu].lock_gauge(wannier);
+        coupling__[mu].lock_space(Space::k);
+        coupling__[mu].go_to_R();
     }
 }
 
@@ -227,21 +242,21 @@ void Lattice::read_coupling(const GridStructure& gridstructure__, const parallel
 /// With the weights M_atom/M_total the coupling does not change along any displacement that keeps the center of mass
 /// fixed (sum_atom M_atom u_atom = 0, e.g. the optical modes): u.g is the same before and after. After it,
 /// sum_atom g_(atom, alpha) = 0, so the force on the center of mass is zero and Pi satisfies the acoustic sum rule.
-/// The largest max|sum_atom g| / max|g| is stored for the recap.
-void Lattice::remove_translation_from_coupling()
+/// The largest max|sum_atom g| / max|g| is returned for the recap.
+double Lattice::remove_translation_from_coupling(std::vector<Operator<std::complex<double>>>& coupling__) const
 {
     double total_mass = 0.;
     for( int atom = 0; atom < num_atoms_; ++atom ) {
         total_mass += mass_[3 * atom];
     }
-    auto& g0 = coupling_[0].get_Operator(Space::k);
+    auto& g0 = coupling__[0].get_Operator(Space::k);
     BlockMatrix<std::complex<double>> sum(k, g0.get_nblocks(), num_bands_, num_bands_);
-    translation_coupling_ = 0.;
+    double translation = 0.;
     for( int ix : {0, 1, 2} ) {
         sum.fill(0.);
         double scale = 0.;
         for( int atom = 0; atom < num_atoms_; ++atom ) {
-            auto& g = coupling_[3 * atom + ix].get_Operator(Space::k);
+            auto& g = coupling__[3 * atom + ix].get_Operator(Space::k);
             for( int i = 0; i < g.get_TotalSize(); ++i ) {
                 *(sum.begin() + i) += *(g.begin() + i);
                 scale = std::max(scale, std::abs(*(g.begin() + i)));
@@ -256,11 +271,11 @@ void Lattice::remove_translation_from_coupling()
         MPI_Allreduce(MPI_IN_PLACE, &scale, 1, MPI_DOUBLE, MPI_MAX, comm_->communicator());
 #endif
         if( scale > 0. ) {
-            translation_coupling_ = std::max(translation_coupling_, largest / scale);
+            translation = std::max(translation, largest / scale);
         }
         for( int atom = 0; atom < num_atoms_; ++atom ) {
             int mu = 3 * atom + ix;
-            auto& g = coupling_[mu].get_Operator(Space::k);
+            auto& g = coupling__[mu].get_Operator(Space::k);
             double weight = mass_[mu] / total_mass;
             for( int i = 0; i < g.get_TotalSize(); ++i ) {
                 *(g.begin() + i) -= weight * *(sum.begin() + i);
@@ -268,17 +283,18 @@ void Lattice::remove_translation_from_coupling()
         }
     }
     for( int mu = 0; mu < num_modes_; ++mu ) {
-        coupling_[mu].lock_gauge(wannier);
-        coupling_[mu].lock_space(Space::k);
-        coupling_[mu].go_to_R();
+        coupling__[mu].lock_gauge(wannier);
+        coupling__[mu].lock_space(Space::k);
+        coupling__[mu].go_to_R();
     }
+    return translation;
 }
 
 namespace {
 
 /// @brief Static linear response of the electrons of the model: the two ingredients chi0 and Sigma[delta rho],
 /// on the local k points and in the Wannier gauge. Used by the static reference (Lattice::static_response) and by
-/// the unscreening of the coupling of EPW (Lattice::unscreen_coupling).
+/// the check of the screened coupling of EPW (Lattice::screening_mismatch).
 class ModelResponse
 {
     private:
@@ -524,51 +540,34 @@ void symmetric_eigen(std::vector<double> A__, const int n__, std::vector<double>
 
 }
 
-/// @brief Screened coupling of EPW -> coupling to use with the mean field of the model (coupling = screened).
+/// @brief Consistency of the two couplings of EPW with the mean field of the model (only with g_s given).
 ///
-/// EPW gives the screened coupling g_s = dV_ion + dV_Hxc: the electrons of DFT (all the bands) respond to the
-/// displacement. EDUS generates again, during the propagation, the part of this screening due to the electrons of
-/// the model through Sigma[delta rho], so the coupling in H must be screened by everything except the model
-/// (the same idea of the constrained RPA and DFPT). In the static limit the electrons of the model respond with
-/// delta rho = chi0 V, V = g_b + Sigma[delta rho] the total perturbation. Asking V = g_s gives, exactly and without
-/// iterations (Sigma is linear in delta rho),
-///     g_b = g_s - Sigma[chi0 g_s].
-/// Then in the static limit the electrons feel exactly the coupling of DFPT. The approximation is that the response
-/// of the model is the one of its mean field (Hartree + SEX) and not the Hxc of DFT. Without the mean field g_b = g_s.
-/// The k and R components of coupling_ are replaced. gtilde = chi0 g_s (Eq. 19 of the notes on the Born-Oppenheimer
-/// response) is the static response per unit displacement: it is kept in gtilde_ for static_response, which with
-/// g_b does not need to solve the self-consistent problem again.
-void Lattice::unscreen_coupling(const GridStructure& gridstructure__, const parallel::Decomposition& decomposition__,
-                                const electron::System& system__, electron::MeanField* meanfield__)
+/// The electrons feel u.g_s + Sigma[rho - rho_BO]. With rho_BO = rho0 + u.chi0 g_s this is exactly
+/// u.(g_s - Sigma[chi0 g_s]) + Sigma[rho - rho0], i.e. the bare coupling of the model is g_s - Sigma[chi0 g_s].
+/// The force on the lattice uses g_b of EPW: the two coincide (and the total energy is conserved) only if the mean
+/// field of the model generates the screening that DFPT gives to its bands. Returns
+/// max|g_s - Sigma[chi0 g_s] - g_b| / max|g_b| over the modes (0 without the mean field: then the check is g_s = g_b).
+double Lattice::screening_mismatch(const GridStructure& gridstructure__, const parallel::Decomposition& decomposition__,
+                                   const electron::System& system__, electron::MeanField* meanfield__) const
 {
-    PROFILE("phonon::Lattice::unscreen_coupling");
+    PROFILE("phonon::Lattice::screening_mismatch");
     ModelResponse response(gridstructure__, decomposition__, system__, meanfield__, num_bands_);
-    unscreening_change_ = 0.;
-    if( !response.interacting() ) {
-        return;
-    }
     const int nk_local = response.nk_local();
+    BlockMatrix<std::complex<double>> drho(k, nk_local, num_bands_, num_bands_);
     BlockMatrix<std::complex<double>> sigma(k, nk_local, num_bands_, num_bands_);
-    gtilde_.clear();
+    double difference = 0., scale = 0.;
     for( int mu = 0; mu < num_modes_; ++mu ) {
-        /* g = g_s on input, g_b on output */
-        auto& g = coupling_[mu].get_Operator(Space::k);
-        gtilde_.emplace_back(k, nk_local, num_bands_, num_bands_);
-        auto& gtilde = gtilde_.back();
-        response.chi0(gtilde, g);
-        response.self_energy(sigma, gtilde);
-        /* relative size of the correction, for the recap */
-        double scale = max_abs(g, nullptr, *comm_);
-        if( scale > 0. ) {
-            unscreening_change_ = std::max(unscreening_change_, max_abs(sigma, nullptr, *comm_) / scale);
+        auto& gs = coupling_screened_[mu].get_Operator(Space::k);
+        auto& gb = coupling_[mu].get_Operator(Space::k);
+        response.chi0(drho, gs);
+        response.self_energy(sigma, drho);
+        for( int i = 0; i < sigma.get_TotalSize(); ++i ) {
+            *(sigma.begin() + i) = *(gs.begin() + i) - *(sigma.begin() + i);
         }
-        for( int i = 0; i < g.get_TotalSize(); ++i ) {
-            *(g.begin() + i) -= *(sigma.begin() + i);
-        }
-        coupling_[mu].lock_gauge(wannier);
-        coupling_[mu].lock_space(Space::k);
-        coupling_[mu].go_to_R();
+        difference = std::max(difference, max_abs(sigma, &gb, *comm_));
+        scale = std::max(scale, max_abs(gb, nullptr, *comm_));
     }
+    return scale > 0. ? difference / scale : 0.;
 }
 
 /// @brief Static linear response of the electrons to a displacement of the lattice, and the electronic force
@@ -580,13 +579,15 @@ void Lattice::unscreen_coupling(const GridStructure& gridstructure__, const para
 /// with f the occupations, e the band energies and V the total perturbation felt by the electrons. With the mean
 /// field, delta rho changes the self energy, which is part of the perturbation: V = g_nu + Sigma[delta rho].
 /// The equation delta rho = chi0 (g_nu + Sigma[delta rho]) is solved as follows:
+/// - with the screened coupling of EPW the electrons feel g_s + Sigma[rho - rho_BO], and in the static limit
+///   Sigma[rho_BO - rho_BO] = 0: V = g_s and delta rho = chi0 g_s, in a single step;
 /// - without the mean field a single step, V = g_nu, is exact;
-/// - if the coupling was unscreened (unscreen_coupling), g_b + Sigma[gtilde] = g_s, so the solution is gtilde = chi0 g_s,
-///   already computed: no iterations;
 /// - otherwise by Anderson mixing of the fixed point delta rho -> chi0 (g_nu + Sigma[delta rho]). The problem is linear,
 ///   and Anderson mixing is then close to GMRES: it converges also when the plain iteration does not (strong mean field).
-/// Pi is then the force on mu due to delta rho_nu,
-///     Pi_{mu nu} = s/N sum_k Tr[g_mu delta rho_nu].
+/// Pi is then the force on mu due to delta rho_nu, always with the bare coupling g_b,
+///     Pi_{mu nu} = s/N sum_k Tr[g_mu delta rho_nu]
+/// (with g_s, Pi = s/N Tr[g_b chi0 g_s], one bare and one screened vertex: not symmetric if the two couplings are
+/// not consistent with the mean field, see screening_mismatch). delta rho_nu is kept in R in response_, for rho_BO.
 /// This is exactly the screening contained in the Born-Oppenheimer force constants of ph.x, but computed with the
 /// electrons of the model, which are the ones that are propagated.
 ///
@@ -620,13 +621,15 @@ mdarray<std::complex<double>, 2> Lattice::static_response(const GridStructure& g
     response_iterations_ = 0;
     response_error_ = 0.;
     /* one problem for each displacement nu (the response is linear: displacements are independent) */
+    response_.resize(num_modes_);
     for( int nu = 0; nu < num_modes_; ++nu ) {
         auto& g = coupling_[nu].get_Operator(Space::k);
         int iteration = 0;
         double error = 0.;
-        if( !gtilde_.empty() ) {
-            /* unscreened coupling: the solution is gtilde, computed by unscreen_coupling */
-            std::copy(gtilde_[nu].begin(), gtilde_[nu].end(), drho.begin());
+        if( parameters_.screened() ) {
+            /* the static screening is already in g_s: V = g_s */
+            response.chi0(drho, coupling_screened_[nu].get_Operator(Space::k));
+            iteration = 1;
         }
         else if( !interacting ) {
             /* V = g does not depend on delta rho: one step is the solution */
@@ -696,6 +699,16 @@ mdarray<std::complex<double>, 2> Lattice::static_response(const GridStructure& g
                 }
             }
         }
+        /* delta rho_nu in R, where rho_BO is built during the propagation */
+        std::stringstream tag;
+        tag << "drho_" << nu;
+        response_[nu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
+                                     decomposition__.mpindex(), tag.str());
+        std::copy(drho.begin(), drho.end(), response_[nu].get_Operator(Space::k).begin());
+        response_[nu].lock_gauge(wannier);
+        response_[nu].lock_space(Space::k);
+        response_[nu].go_to_R();
+
         /* worst case over the displacements, for the recap */
         response_iterations_ = std::max(response_iterations_, iteration);
         response_error_ = std::max(response_error_, error);
@@ -717,11 +730,11 @@ mdarray<std::complex<double>, 2> Lattice::static_response(const GridStructure& g
     MPI_Allreduce(MPI_IN_PLACE, Pi.data(), int(Pi.get_TotalSize()), MPI_CXX_DOUBLE_COMPLEX, MPI_SUM, comm_->communicator());
 #endif
     double num_k = coupling_[0].get_Operator(Space::k).get_MeshGrid()->get_TotalSize();
-    /* Pi is hermitian (real symmetric at Gamma) up to the convergence error: symmetrize, and apply s/N */
+    /* not symmetrized: F[rho - rho0] - Pi u must be exactly the force of rho - rho_BO */
     mdarray<std::complex<double>, 2> result({num_modes_, num_modes_});
     for( int mu = 0; mu < num_modes_; ++mu ) {
         for( int nu = 0; nu < num_modes_; ++nu ) {
-            result(mu, nu) = 0.5 * (Pi(mu, nu) + std::conj(Pi(nu, mu))) * parameters_.spin_degeneracy / num_k;
+            result(mu, nu) = Pi(mu, nu) * parameters_.spin_degeneracy / num_k;
         }
     }
     /* acoustic sum rule of Pi, only as a check: with the translation removed from g (acoustic_sum_rule) the sums
@@ -783,9 +796,7 @@ std::vector<double> Lattice::frequencies(const mdarray<std::complex<double>, 2>&
 /// so that without the electrons Q'' = -omega^2 Q, and E_lambda = 1/2 dQ^2 + 1/2 omega^2 Q^2.
 /// The lattice of the Ehrenfest dynamics is classical, a coherent state of the phonons with
 /// <b_lambda> = (omega Q + i dQ)/sqrt(2 omega): its number of phonons is |<b>|^2 = E_lambda/omega (hbar = 1).
-/// With the adiabatic reference none or dynamic the dynamics uses these force constants and
-/// sum_lambda E_lambda = E_lattice; with static it uses K - Pi, and sum_lambda E_lambda = E_lattice + 1/2 u.Pi.u, the
-/// energy of the lattice with the adiabatic response of the electrons.
+/// The dynamics uses these force constants, so sum_lambda E_lambda = E_lattice.
 /// In a degenerate subspace (e.g. the E modes of hBN) the single modes are an arbitrary choice: only their sum is meaningful.
 ModeProjection Lattice::project_on_modes(const Coordinates& x__, const std::vector<double>& F__) const
 {
@@ -819,7 +830,8 @@ void Lattice::initial_condition(Coordinates& x__) const
     }
 }
 
-/// @brief Electrons in the displaced lattice: H(R) += sum_mu u_mu g_mu(R), on the local R points.
+/// @brief Electrons in the displaced lattice: H(R) += sum_mu u_mu g_mu(R), on the local R points, with g_s if
+/// given, g_b otherwise.
 /// It is called on the R component of the Hamiltonian, after H0 + E.r and the self energy and before the Peierls
 /// phase, like any other lattice-periodic term of the Hamiltonian.
 void Lattice::add_coupling(Operator<std::complex<double>>& H__, const Coordinates& x__) const
@@ -831,7 +843,7 @@ void Lattice::add_coupling(Operator<std::complex<double>>& H__, const Coordinate
         if( u == 0. ) {
             continue;
         }
-        auto& gR = coupling_[mu].get_Operator(R);
+        auto& gR = electronic_coupling(mu).get_Operator(R);
         #pragma omp parallel for schedule(static)
         for( int iR = 0; iR < HR.get_nblocks(); ++iR ) {
             for( int i = 0; i < num_bands_; ++i ) {
@@ -843,14 +855,56 @@ void Lattice::add_coupling(Operator<std::complex<double>>& H__, const Coordinate
     }
 }
 
-/// @brief Force of the electrons on the lattice, F_mu = s/N sum_k Tr[g_mu(k) (rho(k) - rho_ref(k))].
+/// @brief Adiabatic density matrix of the static reference, rho_BO(R) = rho0(R) + sum_mu u_mu delta rho_mu(R), on the
+/// local R points (R component of rho_bo__, which must be allocated like rho0__)
+void Lattice::adiabatic_density(Operator<std::complex<double>>& rho_bo__, const Coordinates& x__,
+                                const Operator<std::complex<double>>& rho0__) const
+{
+    auto& out = rho_bo__.get_Operator(R);
+    auto& rho0 = rho0__.get_Operator(R);
+    std::copy(rho0.begin(), rho0.end(), out.begin());
+    for( int mu = 0; mu < num_modes_; ++mu ) {
+        double u = x__.displacement(0, mu).real();
+        if( u == 0. ) {
+            continue;
+        }
+        auto& drho = response_[mu].get_Operator(R);
+        #pragma omp parallel for schedule(static)
+        for( int iR = 0; iR < out.get_nblocks(); ++iR ) {
+            for( int i = 0; i < num_bands_; ++i ) {
+                for( int j = 0; j < num_bands_; ++j ) {
+                    out(iR, i, j) += u * drho(iR, i, j);
+                }
+            }
+        }
+    }
+    rho_bo__.lock_gauge(wannier);
+    rho_bo__.lock_space(R);
+}
+
+/// @brief Energy of the adiabatic response of the static reference, 1/2 u.Pi.u (0 with the dynamic reference)
+double Lattice::adiabatic_energy(const Coordinates& x__) const
+{
+    if( Pi_.get_TotalSize() == 0 ) {
+        return 0.;
+    }
+    double energy = 0.;
+    for( int mu = 0; mu < num_modes_; ++mu ) {
+        for( int nu = 0; nu < num_modes_; ++nu ) {
+            energy += 0.5 * x__.displacement(0, mu).real() * Pi_(mu, nu).real() * x__.displacement(0, nu).real();
+        }
+    }
+    return energy;
+}
+
+/// @brief Force of the electrons on the lattice, F_mu = s/N sum_k Tr[g_mu(k) (rho(k) - rho_ref(k))], with g_b.
 ///
 /// It is computed in R, where rho is already available during the propagation (the self energy is computed in R
 /// too), using Parseval with the convention O(k) = sum_R e^{ik.R} O(R):
 ///     1/N sum_k Tr[A(k) B(k)] = sum_R Tr[A(R) B(-R)] = sum_R sum_mn A_mn(R) conj(B_mn(R))   (B hermitian).
 /// rho__ must be the physical density matrix (without the Peierls phase) with its R component up to date;
-/// reference__ is rho0 (only the change of rho pushes the atoms, at equilibrium the geometry is relaxed) or rho_BO
-/// (dynamic adiabatic reference). The atoms feel -F (see derivative).
+/// reference__ is rho0 (the whole change of rho, at equilibrium the geometry is relaxed) or rho_BO (only the excited
+/// part, the force used in the dynamics). The atoms feel -F (see derivative).
 std::vector<double> Lattice::force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
 {
     auto& rho = rho__.get_Operator(R);
@@ -901,7 +955,7 @@ void Lattice::derivative(Coordinates& dx__, const Coordinates& x__, const std::v
 }
 
 /// @brief Energy of the lattice per unit cell: kinetic 1/2 M v^2 plus harmonic 1/2 u.K.u, with the force
-/// constants used in the dynamics. The coupling energy u.F is computed by OutputManager, which has rho.
+/// constants of ph.x. The coupling energy u.F is computed by OutputManager, which has rho.
 double Lattice::energy(const Coordinates& x__) const
 {
     double energy = 0.;
@@ -923,17 +977,22 @@ void Lattice::print_recap() const
     auto to_str = [](bool b) { return std::string(b ? "True" : "False"); };
     const double ha_to_cm = 219474.6313705;
     output::title("PHONONS (EHRENFEST)");
-    output::print("EPW directory            *", std::string(8, ' '), parameters_.epw_directory);
-    output::print("epmatwp                  *", std::string(8, ' '), parameters_.epmatwp);
+    output::print("EPW directory (bare)     *", std::string(8, ' '), parameters_.epw_directory);
+    output::print("epmatwp (bare)           *", std::string(8, ' '), parameters_.epmatwp);
+    if( parameters_.screened() ) {
+        output::print("EPW directory (screened) *", std::string(8, ' '), parameters_.epw_directory_screened);
+        output::print("epmatwp (screened)       *", std::string(8, ' '), parameters_.epmatwp_screened);
+    }
     output::print("Dynamical matrix         *", std::string(8, ' '), parameters_.dyn_file);
     output::print("Atoms, modes             *", num_atoms_, num_modes_);
     output::print("q points                 *", num_qpoints(), " (Gamma)");
     output::print("Spin degeneracy          *", parameters_.spin_degeneracy);
-    output::print("Coupling of EPW          *", std::string(8, ' '), to_string(parameters_.coupling));
-    output::print("Coupling scale           *", parameters_.coupling_scale);
-    if( parameters_.coupling == CouplingType::screened ) {
-        output::print("Unscreening: correction  *", unscreening_change_);
+    output::print("Electrons feel           *", std::string(8, ' '),
+                  parameters_.screened() ? "u.g_s + Sigma[rho - rho_BO]" : "u.g_b + Sigma[rho - rho0]");
+    if( parameters_.screened() ) {
+        output::print("|g_s-Sigma[chi0 g_s]-g_b|*", screening_mismatch_, " (max, relative to max|g_b|)");
     }
+    output::print("Coupling scale           *", parameters_.coupling_scale);
     output::print("Damping time             *", parameters_.damping_time, " a.u.",
                   Convert(parameters_.damping_time, AuTime, FemtoSeconds), " fs");
     output::print("Acoustic sum rule        *", std::string(8, ' '), to_str(parameters_.acoustic_sum_rule));
@@ -942,25 +1001,32 @@ void Lattice::print_recap() const
         output::print("Translation in g removed *", translation_coupling_, " (max|sum_atom g| / max|g|)");
     }
     output::print("Adiabatic reference      *", std::string(8, ' '), to_string(parameters_.adiabatic_reference));
-    if( parameters_.adiabatic_reference == AdiabaticReference::static_response ) {
-        if( response_iterations_ == 0 ) {
-            output::print("Static response          *", std::string(8, ' '), "chi0 g_s from the unscreening (exact)");
-        }
-        else {
-            output::print("Static response: iter.   *", response_iterations_);
-            output::print("Static response: resid.  *", response_error_);
-        }
+    if( static_reference() ) {
+        output::print("Static response: iter.   *", response_iterations_);
+        output::print("Static response: resid.  *", response_error_);
         output::print("ASR of Pi: max|sum|      *", pi_asr_residual_, " Ha/bohr^2");
     }
-    output::print("max|H_EPW - H_tb|        *", gauge_check_, " Ha", Convert(gauge_check_, AuEnergy, ElectronVolt), " eV");
-    if( gauge_check_ > 1.e-4 ) {
+    output::print("max|H_EPW - H_tb| (bare) *", gauge_check_, " Ha", Convert(gauge_check_, AuEnergy, ElectronVolt), " eV");
+    if( parameters_.screened() ) {
+        output::print("max|H_EPW - H_tb| (scr.) *", gauge_check_screened_, " Ha",
+                      Convert(gauge_check_screened_, AuEnergy, ElectronVolt), " eV");
+    }
+    if( std::max(gauge_check_, gauge_check_screened_) > 1.e-4 ) {
         output::print("WARNING: the Hamiltonian of EPW is not the one of the tight-binding model: the Wannier functions "
                       "(or their order and phases) are different and the coupling is in another gauge");
     }
-    output::print("Frequencies at Gamma (cm^-1): of the force constants used in the dynamics (without the static response of the");
-    output::print("electrons for the static reference), and of the dynamical matrix of ph.x:");
-    for( int i = 0; i < num_modes_; ++i ) {
-        output::print("   ", i, frequencies_[i] * ha_to_cm, frequencies_input_[i] * ha_to_cm);
+    if( static_reference() ) {
+        output::print("Frequencies at Gamma (cm^-1) of the dynamical matrix of ph.x (used in the dynamics), and of the");
+        output::print("bare lattice K_BO - Pi (without the static response of the electrons of the model):");
+        for( int i = 0; i < num_modes_; ++i ) {
+            output::print("   ", i, frequencies_input_[i] * ha_to_cm, frequencies_bare_[i] * ha_to_cm);
+        }
+    }
+    else {
+        output::print("Frequencies at Gamma (cm^-1) of the dynamical matrix of ph.x (used in the dynamics):");
+        for( int i = 0; i < num_modes_; ++i ) {
+            output::print("   ", i, frequencies_input_[i] * ha_to_cm);
+        }
     }
     output::stars();
 }
