@@ -39,3 +39,16 @@ A1' displaced by 0.005 A, IPA, 6x6, static reference, 180 fs (frequency fit / en
 - g_s alone: 396.707 cm^-1 (ph.x 396.705), drift 2e-7;
 - g_b + g_s: 396.665 cm^-1, energy not conserved (max|g_s - Sigma[chi0 g_s] - g_b| / max|g_b| = 0.97: in IPA the two
   couplings should coincide, the fully bare g_b is not the bare coupling of the model).
+
+## cDFPT coupling (`cdfpt/`)
+
+g^c = coupling screened by everything except the bands of the model, from constrained DFPT (Nomura and Arita,
+PRB 92, 245108 (2015)) with the elphmod patch for QE 7.6 (`~/codes/q-e-EPW-6.1-cdfpt`, `cdfpt.f90` added to the CMake
+of LR_Modules). ph.x at Gamma with `cdfpt_bnd = 7..17`: projwfc on the full 12x12 grid shows that the 11 states with
+the largest Mo d + S p weight are exactly the bands 7-17 at every k (a run with `cdfpt_orb` and nosym gives the same
+frequencies, but EPW rejects its representations). Then EPW on the same `.ukk` with the constrained dvscf.
+`mos2_cdfpt.dyn1` is the cDFPT dynamical matrix (bare lattice of the model; it violates the acoustic sum rule a lot:
+acoustic modes at 218 and 424 cm^-1). max|g^c| = 0.39 (g_s 0.098, g_ion 6.15).
+
+Check (IPA, g^c + g_s, static reference): K_BO - Pi with Pi = Tr[g^c chi0 g_s] gives E'' 431.5 and E' 521.5 cm^-1,
+against 431.65 and 521.97 of the cDFPT dynamical matrix (A1' and A2'' are mixed with the z acoustic mode there).
