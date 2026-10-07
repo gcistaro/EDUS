@@ -24,3 +24,18 @@ K0 = K_BO - Pi: 1092 cm^-1), so the electronic anharmonicity of the model is amp
 frequency changes with the initial displacement as omega/omega_ph.x - 1 = -2.0e-3 + 1.15e3 u0^2 (u0 of each S in A):
 the linear limit is the non-adiabatic softening, at u0 = 0.005 A the frequency is 2.7 % above ph.x. The dynamic
 reference gives the frequency of ph.x exactly at any amplitude.
+
+## Bare and screened coupling
+
+`mos2.epmatwp` here was written by the local EPW build with `bare_only = .TRUE.` (`~/codes/q-e-EPW-6.1`): it is the
+fully bare coupling dV_ion (no dvscf, no nonlinear core correction), g_b for `epw_directory`.
+`screened/` has the same files from the standard EPW (`bare_only = .FALSE.`, `~/codes/q-e-EPW-6.1-screened`), run
+with `wannierize = .false.` on the same `.ukk`: same Wannier functions (`epwdata.fmt` identical), screened coupling g_s
+for `epw_directory_screened` (or for `epw_directory` alone). max|g_s| = 0.098, max|g_b| = 6.15 (Ry/bohr units of EPW),
+||g_s|| / ||g_b|| = 0.066.
+
+A1' displaced by 0.005 A, IPA, 6x6, static reference, 180 fs (frequency fit / energy drift relative to E_lattice):
+- g_b alone: 407.88 cm^-1 (+2.8 %), drift 7e-4 (the bare g gives Pi = -6.6 K_BO for A1');
+- g_s alone: 396.707 cm^-1 (ph.x 396.705), drift 2e-7;
+- g_b + g_s: 396.665 cm^-1, energy not conserved (max|g_s - Sigma[chi0 g_s] - g_b| / max|g_b| = 0.97: in IPA the two
+  couplings should coincide, the fully bare g_b is not the bare coupling of the model).
