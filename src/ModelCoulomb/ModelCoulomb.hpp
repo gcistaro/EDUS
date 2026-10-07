@@ -37,6 +37,8 @@ class ModelCoulomb
         double min_distance_norm_;
         /// Spin degeneracy to be used. For normal simulations, 2 for bare and 1 for screened
         int spin_deg_;
+        /// Saturation distance = cutoff_factor_ * minimum distance between Wannier centers
+        double cutoff_factor_ = 1.;
     public:
         ModelCoulomb(){};
         ModelCoulomb(const std::vector<Coordinate>& wannier_centers, 
@@ -57,6 +59,11 @@ class ModelCoulomb
         void set_epsilon(const double& Epsilon__);
         void set_r0(const std::vector<double>& r0__);
         void set_coulomb_model(const std::string& model_name__);
+        /// The interaction is saturated at factor__ times the minimum distance between Wannier centers (default 1);
+        /// call before initialize
+        void set_cutoff_factor(const double& factor__) { cutoff_factor_ = factor__; }
+        /// Distance below which the interaction is saturated (a.u.)
+        double cutoff_distance() const { return min_distance_norm_; }
         std::array<double, 3>& get_r0();
         double get_r0_avg();
         const std::array<double, 3>& r0() const { return Parameters_.r0; }

@@ -1,6 +1,9 @@
 #include "MeanField/MeanField.hpp"
 #include "ModelCoulomb/ModelCoulomb.hpp"
 #include <filesystem> 
+#include <functional>
+#include <limits>
+#include "Geometry/SymmetricEigen.hpp"
 
 
 namespace electron {
@@ -13,6 +16,51 @@ MeanField::MeanField( const MeanFieldParameters& parameters__,
                       const parallel::Decomposition& decomposition__ )
 {
     initialize( parameters__, gridstructure__, wannier_centers__, decomposition__ );
+}
+
+/// @brief Wannier centers grouped by atom, for the Hartree term (hartree_centers = atoms).
+/// The centers closer than hartree_center_tolerance (directly or through other centers of the group) form a group,
+/// and each one is replaced by the mean of its group. In a model with several orbitals per atom (e.g. the d of Mo)
+/// the centers differ by a fraction of angstrom: with the point-charge interaction some on-site pairs get the
+/// value at r = 0 and others 1/r, and the Hartree matrix is not positive semidefinite (moving charge between the
+/// orbitals of an atom lowers the Hartree energy, and rho0 is unstable). With the same position the on-site
+/// interaction is the same for all the orbitals of an atom.
+std::vector<Coordinate> MeanField::hartree_centers(const std::vector<Coordinate>& wannier_centers__)
+{
+    const int n = int(wannier_centers__.size());
+    std::vector<int> group(n);
+    for( int i = 0; i < n; ++i ) {
+        group[i] = i;
+    }
+    /* union of the groups of the pairs closer than the tolerance */
+    std::function<int(int)> root = [&](int i) { return group[i] == i ? i : group[i] = root(group[i]); };
+    for( int i = 0; i < n; ++i ) {
+        for( int j = i + 1; j < n; ++j ) {
+            if( (wannier_centers__[i] - wannier_centers__[j]).norm() < parameters_.hartree_center_tolerance ) {
+                group[root(i)] = root(j);
+            }
+        }
+    }
+    std::vector<Coordinate> centers(n);
+    hartree_groups_ = 0;
+    for( int i = 0; i < n; ++i ) {
+        if( root(i) == i ) {
+            ++hartree_groups_;
+        }
+        double x[3] = {0., 0., 0.};
+        int count = 0;
+        for( int j = 0; j < n; ++j ) {
+            if( root(j) == root(i) ) {
+                auto& c = wannier_centers__[j].get("Cartesian");
+                for( int ix : {0, 1, 2} ) {
+                    x[ix] += c[ix];
+                }
+                ++count;
+            }
+        }
+        centers[i] = Coordinate(x[0] / count, x[1] / count, x[2] / count);
+    }
+    return centers;
 }
 
 /// @brief Initialize the objects of the class, mainly ModelCoulomb and the Hartree potential, defined as:
@@ -28,9 +76,13 @@ void MeanField::initialize( const MeanFieldParameters& parameters__,
         return;
     }
 
+    /* the bare interaction is used only for the Hartree term: with hartree_centers = atoms the orbitals of the same
+       atom are put at the same position (see hartree_centers) */
+    auto centers = parameters_.hartree_on_atoms ? hartree_centers(wannier_centers__) : wannier_centers__;
     barecoulomb_.set_coulomb_model("vcoul3d");
     barecoulomb_.set_epsilon(1.);
-    barecoulomb_.initialize  (wannier_centers__, 
+    barecoulomb_.set_cutoff_factor(parameters_.hartree_cutoff_factor);
+    barecoulomb_.initialize  (centers, 
                               gridstructure__.Rgrid_GammaCentered(), 
                               parameters__.read_interaction, 
                               parameters__.bare_file, 
@@ -121,6 +173,33 @@ void MeanField::initialize( const MeanFieldParameters& parameters__,
             Hartree(icol, irow) = value;
         }
     }
+
+    /* smallest eigenvalue of the Hartree matrix for the changes of the density that keep the number of electrons:
+       if it is negative, moving charge along it lowers the Hartree energy and rho0 is unstable */
+    hartree_min_eigenvalue_ = std::numeric_limits<double>::max();
+    if( HasOrigin_ ) {
+        std::vector<double> P(num_bands * num_bands), PHP(num_bands * num_bands, 0.);
+        for( int i = 0; i < num_bands; ++i ) {
+            for( int j = 0; j < num_bands; ++j ) {
+                P[i * num_bands + j] = (i == j ? 1. : 0.) - 1. / num_bands;
+            }
+        }
+        for( int i = 0; i < num_bands; ++i ) {
+            for( int j = 0; j < num_bands; ++j ) {
+                for( int a = 0; a < num_bands; ++a ) {
+                    for( int b = 0; b < num_bands; ++b ) {
+                        PHP[i * num_bands + j] += P[i * num_bands + a] * Hartree(a, b).real() * P[b * num_bands + j];
+                    }
+                }
+            }
+        }
+        std::vector<double> w, V;
+        symmetric_eigen(PHP, num_bands, w, V);
+        hartree_min_eigenvalue_ = w[0];
+    }
+#ifdef EDUS_MPI
+    MPI_Allreduce(MPI_IN_PLACE, &hartree_min_eigenvalue_, 1, MPI_DOUBLE, MPI_MIN, decomposition__.kpool_comm().communicator());
+#endif
 
     /* make W is hermitian. From tests this modifies only last R */
     auto& W = screencoulomb_.Potential_;
@@ -277,6 +356,19 @@ void MeanField::print_recap() const
             output::print("r0z                      *", r0[2], " a.u.", Convert(r0[2], AuLength, Angstrom), " angstrom");
             output::print("r0_avg                   *", screencoulomb_.r0_avg(), " a.u.", 
                                                         Convert(screencoulomb_.r0_avg(), AuLength, Angstrom), " angstrom");
+            output::print("Hartree centers          *", std::string(8, ' '), (parameters_.hartree_on_atoms ? "atoms" : "wannier"));
+            output::print("Hartree: cutoff          *", barecoulomb_.cutoff_distance(), " a.u.",
+                          Convert(barecoulomb_.cutoff_distance(), AuLength, Angstrom), " angstrom (factor ",
+                          parameters_.hartree_cutoff_factor, ")");
+            if( parameters_.hartree_on_atoms ) {
+                output::print("Hartree: atoms           *", hartree_groups_, " groups of Wannier centers within ",
+                              Convert(parameters_.hartree_center_tolerance, AuLength, Angstrom), " angstrom");
+            }
+        }
+        output::print("Hartree: min eigenvalue  *", hartree_min_eigenvalue_, " Ha (charge-neutral changes)");
+        if( hartree_min_eigenvalue_ < -1.e-8 ) {
+            output::print("WARNING: the Hartree matrix is not positive semidefinite: rho0 can be unstable with the mean field "
+                          "(try hartree_centers = atoms and hartree_cutoff_factor = 0.5, see docs/mean_field/hartree_positivity.tex)");
         }
     }
     output::stars();

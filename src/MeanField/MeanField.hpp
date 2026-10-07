@@ -30,6 +30,12 @@ namespace electron {
             /// The effective Hartree potential, defined as: @f[ H_{nm} = \sum_\textbf{R} V_{nm}(\textbf{R}) = 
             /// \sum_\textbf{R} \langle n\textbf{0}m\textbf{R}|V(r-r')| n\textbf{0}m\textbf{R} \rangle @f]
             mdarray<std::complex<double>, 2> Hartree;
+            /// Smallest eigenvalue of Hartree for the charge-neutral changes of the occupations (Ha), for the recap
+            double hartree_min_eigenvalue_ = 0.;
+            /// Number of groups of Wannier centers (atoms) with hartree_centers = atoms
+            int hartree_groups_ = 0;
+            /// Wannier centers grouped by atom, for the Hartree term (hartree_centers = atoms)
+            std::vector<Coordinate> hartree_centers(const std::vector<Coordinate>& wannier_centers__);
         public:
             MeanField(){};
             MeanField( const MeanFieldParameters& parameters__, 

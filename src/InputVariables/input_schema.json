@@ -101,6 +101,25 @@
             ],
             "title": "Units for the Time resolution used for propagating Density Matrix"
         },
+        "hartree_centers": {
+            "type": "string",
+            "default": "wannier",
+            "enum": [
+                "wannier",
+                "atoms"
+            ],
+            "title": "Positions of the Wannier functions used for the Hartree term: wannier = their centers; atoms = the centers closer than hartree_center_tolerance are grouped and moved to the mean of the group (the atom), so that all the orbitals of an atom have the same on-site interaction and the Hartree matrix is positive semidefinite"
+        },
+        "hartree_cutoff_factor": {
+            "type": "number",
+            "default": 1.0,
+            "title": "The bare interaction of the Hartree term is saturated below hartree_cutoff_factor times the minimum distance between two Wannier centers on different sites, so that the on-site interaction is V(factor * d_min). With 1 the on-site interaction equals the one between the closest centers and the Hartree matrix can have negative eigenvalues (rho0 unstable); 0.5 with hartree_centers = atoms makes it positive semidefinite for MoS2"
+        },
+        "hartree_center_tolerance": {
+            "type": "number",
+            "default": 0.6,
+            "title": "Distance (angstrom) below which two Wannier centers belong to the same atom, for hartree_centers = atoms"
+        },
         "coulomb_model": {
             "type": "string",
             "default": "rytova_keldysh",

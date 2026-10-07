@@ -1,0 +1,152 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\setlength{\emergencystretch}{2em}
+\newcommand{\Dn}{\Delta n}
+
+\title{Positivity of the Hartree term of EDUS\\[2pt]
+\large why $\rho_0$ can be unstable with the mean field, and the options \texttt{hartree\_centers} and \texttt{hartree\_cutoff\_factor}}
+\author{EDUS development notes}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In EDUS the Hartree term is the interaction between point charges sitting at the Wannier centers, saturated below a
+cutoff distance. With several Wannier functions per atom (monolayer MoS$_2$: five Mo $d$ and six S $p$) the resulting
+Hartree matrix has negative eigenvalues: some charge-neutral redistributions of the occupations \emph{lower} the
+Hartree energy, which is impossible for a physical Coulomb repulsion. Then $\rho_0$ is not a minimum of the
+mean-field energy, and the propagation without any perturbation runs away in a few femtoseconds (it is not a
+time-step problem). These notes explain the mechanism and the two input options that fix it, and the check printed in
+the recap.
+\end{abstract}
+
+\section{The Hartree term}
+
+\texttt{MeanField::initialize} builds, from the bare interaction of \texttt{ModelCoulomb} (\texttt{vcoul3d}, $\varepsilon=1$),
+\begin{equation}
+H_{ij} = \sum_{\mathbf R} V\big(|\boldsymbol\tau_i - \mathbf R - \boldsymbol\tau_j|\big),
+\qquad
+V(r) = \frac{s}{\max(r, d_c)},
+\label{eq:H}
+\end{equation}
+with $\boldsymbol\tau_i$ the center of the Wannier function $i$, the sum over the R grid of the simulation, $s=2$ and
+$d_c$ the saturation (cutoff) distance. The self-energy is diagonal and local,
+$\Sigma^{\rm H}_{ii} = \sum_j H_{ij}\,\Dn_j$ with $\Dn_j = \rho_{jj}(\mathbf R=0) - \rho_{0,jj}(\mathbf R=0)$, and its energy
+\begin{equation}
+E_{\rm H} = \tfrac12\,\Dn^{\rm T} H\,\Dn .
+\label{eq:EH}
+\end{equation}
+Until now the cutoff was the smallest distance between two centers on different sites,
+$d_c = d_{\min} = \min_{|\boldsymbol\tau_i-\boldsymbol\tau_j|>0.1}|\boldsymbol\tau_i-\boldsymbol\tau_j|$
+(centers closer than 0.1~bohr are considered the same site). So the on-site interaction is $V(d_{\min})$: the
+interaction between the two closest centers.
+
+\section{Why negative eigenvalues make $\rho_0$ unstable}
+
+The number of electrons is conserved, $\sum_j\Dn_j = 0$: only the eigenvalues of $H$ on this charge-neutral subspace
+matter (the projection $P = 1 - \mathbf 1\mathbf 1^{\rm T}/n$ removes the large constant coming from the long-range
+sum). For a physical charge density the Hartree energy is positive,
+\[
+E_{\rm H} = \frac12\int\!\!\int \frac{\delta n(\mathbf r)\,\delta n(\mathbf r')}{|\mathbf r-\mathbf r'|}
+          = \frac12\int\frac{d^3q}{(2\pi)^3}\,\frac{4\pi}{q^2}\,|\delta n(\mathbf q)|^2 \;\ge\; 0,
+\]
+because the Fourier transform of $1/r$ is positive. A matrix like (\ref{eq:H}) is a valid Coulomb interaction only if
+$PHP$ is positive semidefinite. If it has a negative eigenvalue, moving charge along that eigenvector lowers
+$E_{\rm H}$. Whether $\rho_0$ becomes unstable depends on the competition with the cost in band energy (roughly the
+gap, through $\chi_0^{-1}$ in the static response): when the negative Hartree energy wins, $\rho_0$ is a saddle point
+of the mean-field energy and the linearized dynamics has growing modes. Such an instability does not depend on
+$\varepsilon$ or on the screened exchange (the bare interaction is not screened in EDUS), it is there in RPA, and it is
+physical for the model: the total energy is conserved while the band energy grows. A negative eigenvalue is a defect
+of the model even when the gap hides it: the static screening of the model is then wrong.
+
+\paragraph{Observed on MoS$_2$} (PBE, 11 Wannier functions, 6$\times$6, HSEX, no laser, no phonons):
+$\min{\rm eig}(PHP) = -2.22$~Ha. The band energy goes from $10^{-17}$ to $0.3$~Ha in 1--2~fs while the mean-field
+energy goes to $-0.3$~Ha, with the total energy conserved to $10^{-8}$~Ha, then NaN. Same with $\varepsilon = 5$, 10,
+with RPA, on 12$\times$12, and at $\Delta t = 0.001$~fs. hBN (one orbital per atom) is not affected.
+
+\section{Why the cutoff at $d_{\min}$ is not physical}
+
+A point charge with a cutoff stands for a charge spread over a Wannier function. Its self-interaction must be clearly
+larger than the interaction with the neighbours; with $d_c = d_{\min}$ it is not.
+
+\paragraph{Two sites per cell} (hBN). For $\Dn = (1,-1)$: $2E_{\rm H} = H_{\rm BB} + H_{\rm NN} - 2H_{\rm BN}$. Both $H_{\rm BB}$
+and $H_{\rm BN}$ are lattice sums over the whole crystal, and the difference comes from the closest terms: in
+$H_{\rm BB}$ the R = 0 term is the on-site $V(d_c)$, in $H_{\rm BN}$ there are the three nearest neighbours at $d_{\rm BN}$.
+With $d_c = d_{\min} = d_{\rm BN}$ the on-site term equals one neighbour, while B has three: $H_{\rm BB} = 17.86 <
+H_{\rm BN} = 18.23$~Ha (12$\times$12, hBN model of the tests) and $\min{\rm eig}(PHP) = -0.37$~Ha. hBN is nevertheless
+stable in the tests because its gap (7.25~eV) is large enough; with the DFT gap ($\sim$4.7~eV) the mean-field
+propagation of hBN was found unstable, which may be the same mechanism. With $d_c = d_{\rm BN}/2$ the eigenvalue is
+positive.
+
+\paragraph{Three sites} (MoS$_2$ with the orbitals of an atom at the same position, see below). The grouped matrix
+has on site $U = 6.45$~Ha, Mo--S $V_{\rm MoS} = 6.25$~Ha, S--S $V_{\rm SS}=5.42$~Ha (lattice sums included; the
+S are farther from each other, 5.9~bohr, than from Mo, 4.6~bohr). Moving two electrons from Mo, one to each S,
+$\Dn = (2,-1,-1)$:
+\[
+2E_{\rm H} = U(4+1+1) + 2\big[(2)(-1)V_{\rm MoS}\cdot 2 + (-1)(-1)V_{\rm SS}\big]
+          = 6U - 8V_{\rm MoS} + 2V_{\rm SS} = 38.7 - 50.0 + 10.8 = -0.46~{\rm Ha}.
+\]
+The self-repulsion $6U$ is smaller than the Mo--S attraction gained, $8V_{\rm MoS}$, because the R = 0 term of $U$ is the
+nearest-neighbour value $V(d_{\rm MoS})$ while each atom has several neighbours in the lattice sums; and the two
+negative charges repel each other only through the small $V_{\rm SS}$.
+
+\paragraph{Several centers on one atom} (the actual Wannier centers of MoS$_2$). The five Mo $d$ centers differ by up
+to 0.43~bohr, the closest two by $d_{\min} = 0.13$~bohr. Some on-site pairs get the saturated value $s/0.13$, others
+$s/r$ with $r$ up to 0.43~bohr: entries from 10.6 to 21.7~Ha within the same atom. Moving charge between the $d$
+orbitals of Mo then changes $E_{\rm H}$ by large amounts of both signs: $\min{\rm eig}(PHP) = -2.22$~Ha. The
+differences between the centers are a property of the Wannier gauge, not physics: the five $d$ functions are centered
+on the same atom.
+
+\section{The fix}
+
+Two options of the input (top level, with \texttt{coulomb}), used only for the Hartree term; the screened exchange
+keeps the actual Wannier centers.
+\begin{itemize}
+\item \texttt{hartree\_centers = "atoms"} (default \texttt{"wannier"}): centers closer than
+      \texttt{hartree\_center\_tolerance} (default 0.6~\AA, directly or through other centers) are grouped, and each
+      one is moved to the mean of its group. All the orbitals of an atom then have the same on-site interaction.
+\item \texttt{hartree\_cutoff\_factor} (default 1): $d_c = f\,d_{\min}$. With $f = 1/2$ and grouped centers the on-site
+      interaction is $V(d_{\rm NN}/2) = 2V(d_{\rm NN})$, twice the nearest-neighbour one; for MoS$_2$
+      $U = s/2.28~{\rm bohr}$, i.e.\ 0.44~Ha = 12~eV per spin, a reasonable bare $U$ for $d$ orbitals.
+\end{itemize}
+
+\begin{center}
+\begin{tabular}{llcc}
+\toprule
+centers & cutoff & $\min{\rm eig}(PHP)$ (Ha), 6$\times$6 & 12$\times$12\\
+\midrule
+Wannier & $d_{\min}$ (0.13 bohr) & $-2.22$ & $-2.22$\\
+Wannier & $d_{\min}/2$ & $-4\cdot10^{-4}$ & $-2\cdot10^{-4}$\\
+Wannier & $d_{\min}/4$ & $+4\cdot10^{-5}$ & \\
+atoms & $d_{\min}$ (4.57 bohr) & $-0.30$ & $-0.42$\\
+atoms & $d_{\min}/2$ & $0$ ($10^{-15}$) & $0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For hBN (one center per atom) $f = 1/2$ alone gives a positive eigenvalue. With atoms and $f = 1/2$ the nonzero eigenvalues are 1.49 and 4.39~Ha; the zero ones are the redistributions of charge
+among the orbitals of the same atom, which a monopole Hartree term does not see. Without grouping a smaller cutoff
+also removes the negative eigenvalues, but at the price of an unphysical on-site interaction ($s/0.03$~bohr, hundreds
+of eV). MoS$_2$ with \texttt{hartree\_centers = "atoms"} and \texttt{hartree\_cutoff\_factor = 0.5} stays at
+$E_{\rm band}\sim10^{-16}$~Ha for 40~fs without perturbation, also with $\Delta t = 0.04$~fs.
+
+\paragraph{Limits.} A cutoff on point charges does not guarantee positivity for every geometry. A kernel with a
+positive Fourier transform would, e.g.\ the Ohno form $V(r) = 1/\sqrt{r^2+a^2}$ (Fourier transform
+$\propto a K_1(qa)/q > 0$), with $V(0)=1/a$ the bare on-site $U$ (not implemented; for MoS$_2$ it gives
+$\min{\rm eig}\sim-10^{-5}$~Ha with $a$ = 1--3~bohr, the residual coming from the finite sum over $\mathbf R$).
+
+\section{Check in the recap}
+
+The \texttt{MEAN FIELD} section of the output prints the Hartree centers, the cutoff distance and
+$\min{\rm eig}(PHP)$ (``Hartree: min eigenvalue''), with a warning if it is below $-10^{-8}$~Ha. A negative value
+means that the Hartree term is not a physical repulsion; $\rho_0$ is unstable, whatever the time step, when it
+exceeds the band cost. All the HSEX regression tests on hBN have $-0.37$/$-0.38$~Ha with the defaults (stable thanks
+to the gap); Si, GaAs and LiF have 0. The defaults are kept
+(\texttt{"wannier"}, 1) so that the existing results do not change.
+
+\end{document}

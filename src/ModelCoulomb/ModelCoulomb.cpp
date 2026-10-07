@@ -129,6 +129,10 @@ void ModelCoulomb::initialize(const std::vector<Coordinate>& wannier_centers__,
             }
         }
     }
+    /* the on-site interaction is V(cutoff): with cutoff_factor_ < 1 it is larger than the interaction between the
+       closest centers (see docs/mean_field/hartree_positivity.tex) */
+    min_distance_ = min_distance_ * cutoff_factor_;
+    min_distance_norm_ = min_distance_.norm();
 
     /* initialize potential matrix elements */
     if (read_interaction__) {

@@ -195,6 +195,21 @@ class config_t
         }
         dict_["/r0_units"_json_pointer] = r0_units__;
     }
+    /// Positions of the Wannier functions used for the Hartree term
+    inline auto hartree_centers() const
+    {
+        return dict_.value("/hartree_centers"_json_pointer, "wannier");
+    }
+    /// Saturation distance of the Hartree interaction, in units of the minimum distance between Wannier centers
+    inline auto hartree_cutoff_factor() const
+    {
+        return dict_.value("/hartree_cutoff_factor"_json_pointer, 1.0);
+    }
+    /// Distance (angstrom) below which two Wannier centers belong to the same atom
+    inline auto hartree_center_tolerance() const
+    {
+        return dict_.value("/hartree_center_tolerance"_json_pointer, 0.6);
+    }
     /// Coulomb model type
     inline auto coulomb_model() const
     {
