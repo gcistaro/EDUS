@@ -52,6 +52,9 @@ void dump_json_in_h5( const nlohmann::json& data__, const std::string& name__ )
             fout["json"][lasername].write("frequency",  data__["lasers"][ilaser]["frequency"].template get<double>());
             fout["json"][lasername].write("wavelength", data__["lasers"][ilaser]["wavelength"].template get<double>());
             fout["json"][lasername].write("cycles", data__["lasers"][ilaser]["cycles"].template get<int>());
+            if ( data__["lasers"][ilaser].contains("envelope") ) {
+                fout["json"][lasername].write("envelope", data__["lasers"][ilaser]["envelope"].template get<std::string>());
+            }
             auto polarization = std::vector<double>(3);
             polarization = { data__["lasers"][ilaser]["polarization"][0].template get<double>(), 
                              data__["lasers"][ilaser]["polarization"][1].template get<double>(), 

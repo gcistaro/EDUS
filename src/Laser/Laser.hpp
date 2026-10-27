@@ -67,15 +67,30 @@ class Wave{
 
 
 class Envelope{
-    //properties for something that is described by E(t) = Sin^2((t-t0)/T) for 0<t-t0<T
+    //shape of the pulse, nonzero only for 0<t-t0<Duration:
+    //  sin2:     Sin^2(pi*(t-t0)/T)
+    //  sin4:     Sin^4(pi*(t-t0)/T)
+    //  gaussian: Exp(-(t-t0-T/2)^2/(2 sigma^2)), truncated at T/2 = Cut*sigma
+    //the input fixes the FWHM of the field envelope, the same for all shapes (the one of sin2 with the
+    //given number of cycles), so that changing shape changes only the tails of the spectrum
+    public:
+        enum class Shape {sin2, sin4, gaussian};
     private:
         double Duration = 0;
         double InitialTime = 0;
+        Shape shape = Shape::sin2;
+        double Cut = 7.;//gaussian only, in units of sigma
     
     public:
         double operator()(const double& time);
         void set_Duration(const double& Duration_);
         void set_InitialTime(const double& InitialTime_);
+        void set_Shape(const std::string& Shape_);
+        void set_Cut(const double& Cut_);
+        void set_FWHM(const double& FWHM_);
+        std::string get_ShapeName();
+        double get_Cut();
+        double get_FWHM();
 
         double get_Duration();
         double get_InitialTime();
@@ -115,6 +130,7 @@ class Laser{
         void set_InitialTime(const double& InitialTime_, const Unit& InputUnit);
         void set_Phase(const double& Phase_);
         void set_NumberOfCycles(const double& NumberOfCycles_);
+        void set_Envelope(const std::string& Shape_, const double& Cut_);
         void set_Intensity(const double& Intensity_, const Unit& InputUnit);
         void set_Polarization(const Coordinate& Polarization_);
         void set_TimeGrid(const TimeGrid& TimeGrid_);

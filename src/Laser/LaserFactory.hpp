@@ -26,6 +26,7 @@ public:
                 laser.set_Lambda(currentdata.wavelength(), unit(currentdata.wavelength_units()));
             }
             laser.set_NumberOfCycles(currentdata.cycles());
+            laser.set_Envelope(currentdata.envelope(), currentdata.gaussian_cut());
             laser.set_Phase(currentdata.phase());
             Coordinate pol(currentdata.polarization()[0], currentdata.polarization()[1],
                 currentdata.polarization()[2]);

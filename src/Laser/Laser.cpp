@@ -1,4 +1,6 @@
 #include "Laser/Laser.hpp"
+#include <cmath>
+#include <stdexcept>
 
 double get_period(const frequency& omega_) 
 {
@@ -100,12 +102,93 @@ double Envelope::operator()(const double& Time)
     if( t <= 1.e-07 || t > Duration){
         return 0.;
     }
-    return std::pow(std::sin(pi*t/Duration), 2.);
+    switch(shape){
+        case Shape::sin2:
+            return std::pow(std::sin(pi*t/Duration), 2.);
+        case Shape::sin4:
+            return std::pow(std::sin(pi*t/Duration), 4.);
+        case Shape::gaussian: {
+            auto sigma = Duration/(2.*Cut);
+            auto x = (t - Duration/2.)/sigma;
+            return std::exp(-x*x/2.);
+        }
+    }
+    return 0.;
 }
 
 void Envelope::set_Duration(const double& Duration_)
 {
     Duration = Duration_;
+}
+
+void Envelope::set_Shape(const std::string& Shape_)
+{
+    auto FWHM = get_FWHM();
+    if( Shape_ == "sin2" ) {
+        shape = Shape::sin2;
+    } else if( Shape_ == "sin4" ) {
+        shape = Shape::sin4;
+    } else if( Shape_ == "gaussian" ) {
+        shape = Shape::gaussian;
+    } else {
+        throw std::runtime_error("Unknown laser envelope '" + Shape_ + "': use sin2, sin4 or gaussian");
+    }
+    set_FWHM(FWHM);
+}
+
+void Envelope::set_Cut(const double& Cut_)
+{
+    if( Cut_ <= 0. ) {
+        throw std::runtime_error("The cut of the gaussian envelope must be positive");
+    }
+    auto FWHM = get_FWHM();
+    Cut = Cut_;
+    set_FWHM(FWHM);
+}
+
+/* FWHM of the field envelope as a fraction of Duration:
+   sin2:     sin^2(pi s) = 1/2 at s = 1/4, FWHM = T/2
+   sin4:     sin^4(pi s) = 1/2 at s = arcsin(2^(-1/4))/pi, FWHM = (1 - 2s)T
+   gaussian: FWHM = 2 sqrt(2 ln2) sigma, sigma = T/(2 Cut) */
+static double FWHM_over_Duration(const Envelope::Shape& shape, const double& Cut)
+{
+    switch(shape){
+        case Envelope::Shape::sin2:
+            return 0.5;
+        case Envelope::Shape::sin4:
+            return 1. - 2.*std::asin(std::pow(2., -0.25))/pi;
+        case Envelope::Shape::gaussian:
+            return std::sqrt(2.*std::log(2.))/Cut;
+    }
+    return 0.;
+}
+
+void Envelope::set_FWHM(const double& FWHM_)
+{
+    Duration = FWHM_/FWHM_over_Duration(shape, Cut);
+}
+
+double Envelope::get_FWHM()
+{
+    return Duration*FWHM_over_Duration(shape, Cut);
+}
+
+std::string Envelope::get_ShapeName()
+{
+    switch(shape){
+        case Shape::sin2:
+            return "sin2";
+        case Shape::sin4:
+            return "sin4";
+        case Shape::gaussian:
+            return "gaussian";
+    }
+    return "";
+}
+
+double Envelope::get_Cut()
+{
+    return Cut;
 }
 
 double Envelope::get_Duration()
@@ -182,8 +265,14 @@ void Laser::set_Phase(const double& Phase_)
 void Laser::set_NumberOfCycles(const double& NumberOfCycles_)
 {
     NumberOfCycles = NumberOfCycles_; 
-    auto Duration = NumberOfCycles*PlaneWave.get_Period();
-    envelope.set_Duration(Duration);
+    /* the number of cycles is the duration of the sin2 pulse: it fixes the FWHM also for the other shapes */
+    envelope.set_FWHM(0.5*NumberOfCycles*PlaneWave.get_Period());
+}
+
+void Laser::set_Envelope(const std::string& Shape_, const double& Cut_)
+{
+    envelope.set_Cut(Cut_);
+    envelope.set_Shape(Shape_);
 }
 
 void Laser::set_Intensity(const double& Intensity_, const Unit& InputUnit)
@@ -246,6 +335,12 @@ void Laser::print_info()
     auto t0 = envelope.InitialTime;
     output::print("Initial Time:       *     ", t0,                     " a.u.", Convert(t0, AuTime, FemtoSeconds), " fs");
     output::print("Phase               *     ", PlaneWave.get_Phase()/pi,    " \u03C0");
+    output::print("Envelope:           *     ", envelope.get_ShapeName());
+    if( envelope.get_ShapeName() == "gaussian" ) {
+        output::print("Gaussian cut:       *     ", envelope.get_Cut(), " sigma");
+    }
+    output::print("FWHM (field):       *     ", envelope.get_FWHM(), " a.u.", Convert(envelope.get_FWHM(), AuTime, FemtoSeconds), " fs");
+    output::print("Duration:           *     ", envelope.get_Duration(), " a.u.", Convert(envelope.get_Duration(), AuTime, FemtoSeconds), " fs");
     output::stars();
 }
 

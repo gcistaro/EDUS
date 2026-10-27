@@ -475,7 +475,22 @@
                     "cycles": {
                         "type": "number",
                         "default": 0.0,
-                        "title": "Number of cycles the sin2 laser last."
+                        "title": "Number of cycles the sin2 laser last. For the other envelopes it fixes the same FWHM of the field envelope (cycles*period/2)."
+                    },
+                    "envelope": {
+                        "type": "string",
+                        "default": "sin2",
+                        "enum": [
+                            "sin2",
+                            "sin4",
+                            "gaussian"
+                        ],
+                        "title": "Shape of the envelope of the field. All shapes have the FWHM of the sin2 pulse with the given cycles: sin4 lasts 1.38 times longer, gaussian 2*gaussian_cut*sigma."
+                    },
+                    "gaussian_cut": {
+                        "type": "number",
+                        "default": 7.0,
+                        "title": "Gaussian envelope only: the pulse is truncated at +-gaussian_cut*sigma from its center."
                     },
                     "phase": {
                         "type": "number",
@@ -561,7 +576,22 @@
                     "cycles": {
                         "type": "number",
                         "default": 0.0,
-                        "title": "Number of cycles the sin2 laser last."
+                        "title": "Number of cycles the sin2 laser last. For the other envelopes it fixes the same FWHM of the field envelope (cycles*period/2)."
+                    },
+                    "envelope": {
+                        "type": "string",
+                        "default": "sin2",
+                        "enum": [
+                            "sin2",
+                            "sin4",
+                            "gaussian"
+                        ],
+                        "title": "Shape of the envelope of the field. All shapes have the FWHM of the sin2 pulse with the given cycles: sin4 lasts 1.38 times longer, gaussian 2*gaussian_cut*sigma."
+                    },
+                    "gaussian_cut": {
+                        "type": "number",
+                        "default": 7.0,
+                        "title": "Gaussian envelope only: the pulse is truncated at +-gaussian_cut*sigma from its center."
                     },
                     "phase": {
                         "type": "number",

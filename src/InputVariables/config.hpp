@@ -462,6 +462,14 @@ class config_t
         {
             return dict_.at("cycles").get<double>();
         }
+        auto envelope() const
+        {
+            return dict_.contains("envelope") ? dict_.at("envelope").get<std::string>() : std::string("sin2");
+        }
+        auto gaussian_cut() const
+        {
+            return dict_.contains("gaussian_cut") ? dict_.at("gaussian_cut").get<double>() : 7.0;
+        }
         bool contains(std::string key__) const
         {
             return dict_.contains(key__);
