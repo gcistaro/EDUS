@@ -126,6 +126,10 @@ class Laser{
         double get_NumberOfCycles();
         double get_Lambda();
         double get_Omega();
+        /// State of the integration of the vector potential (A and the time it refers to), for the checkpoint
+        const Coordinate& get_A() const { return A; }
+        double get_previous_Time() const { return previous_Time; }
+        void set_A_state(const Coordinate& A__, const double previous_Time__) { A = A__; previous_Time = previous_Time__; }
 };
 
 

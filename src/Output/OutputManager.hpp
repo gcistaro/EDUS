@@ -88,6 +88,28 @@ class OutputManager
         void write_h5(const double& time__);
 
     public:
+        /// Variables integrated in time by the energy balance (and index of the h5 file), saved in the checkpoint
+        struct RestartState
+        {
+            double work, last_power, second_last_power, last_time, initial_energy;
+            int num_energy_steps, index_h5;
+            std::array<double, 4> power_integral, power_last, power_second_last;
+        };
+        RestartState restart_state() const
+        {
+            return { work_, last_power_, second_last_power_, last_time_, initial_energy_, num_energy_steps_, index_h5_,
+                     power_integral_, power_last_, power_second_last_ };
+        }
+        void set_restart_state(const RestartState& s__)
+        {
+            work_ = s__.work; last_power_ = s__.last_power; second_last_power_ = s__.second_last_power;
+            last_time_ = s__.last_time; initial_energy_ = s__.initial_energy; num_energy_steps_ = s__.num_energy_steps;
+            index_h5_ = s__.index_h5; power_integral_ = s__.power_integral; power_last_ = s__.power_last;
+            power_second_last_ = s__.power_second_last;
+        }
+        /// Output directory
+        const std::string& directory() const { return parameters_.directory; }
+
         OutputManager() = default;
 
         /// Creates the output directory, opens the files and prints the equilibrium density matrix

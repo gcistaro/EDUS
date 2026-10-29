@@ -7,6 +7,16 @@
             "default": "",
             "title": "name of the file _tb.dat"
         },
+        "checkpoint": {
+            "type": "boolean",
+            "default": false,
+            "title": "If true, at the end of the propagation the state is saved in Output/checkpoint (header.json + one binary file per MPI rank) for a restart. Only for RK"
+        },
+        "restart_directory": {
+            "type": "string",
+            "default": "",
+            "title": "If not empty, directory of a checkpoint (e.g. ../run/Output/checkpoint): the propagation starts from the saved state and time, with the same number of MPI ranks and the same input (dt, grid, lasers, phonons). Run it in a new directory: the txt outputs start at the restart time"
+        },
         "decay": {
             "type": "number",
             "default": 0.0,

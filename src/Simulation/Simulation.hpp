@@ -53,6 +53,15 @@ class Simulation
         OutputManager output_;
         /// Recap of the simulation: each component prints its own section
         void print_recap();
+        /// Saves the propagated state (density matrix, lattice, rho_BO, vector potential, energy balance) in directory__:
+        /// header.json written by rank 0 and the local blocks of each rank in rank_<r>.bin
+        void write_checkpoint(const std::string& directory__);
+        /// Number of steps of the checkpoint in directory__, with the checks on dt, initial time, grid and number of ranks
+        long read_checkpoint_step(const std::string& directory__);
+        /// First step of the propagation (the one of the checkpoint for a restart)
+        long first_step_ = 0;
+        /// Overwrites the state initialized by the constructor with the one of the checkpoint
+        void restore_checkpoint(const std::string& directory__);
 
     public:
         

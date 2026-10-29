@@ -19,6 +19,11 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     output::print("-> initializing simulation");
     ctx_ = ctx__;
     convert_input_au();
+    /* restart: the propagation starts at the step of the checkpoint (the state is restored after the initialization);
+       initialtime stays the one of the first run, so that the times t0 + istep*dt are exactly the same */
+    if( !ctx_->cfg().restart_directory().empty() ) {
+        first_step_ = read_checkpoint_step(ctx_->cfg().restart_directory());
+    }
 
     Material material(ctx_->cfg().tb_file());
     int num_bands_ = material.H.get_Operator_R().get_nrows();
@@ -86,6 +91,15 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
                         meanfield_, 
                         propagator_, 
                         setoflaser_ );
+
+    if( !ctx_->cfg().restart_directory().empty() ) {
+        auto own_checkpoint = output_.directory() + "/checkpoint";
+        if( std::filesystem::exists(own_checkpoint) &&
+            std::filesystem::equivalent(own_checkpoint, ctx_->cfg().restart_directory()) ) {
+            throw std::runtime_error("Restart from the checkpoint of the same directory: run it in a new directory\n");
+        }
+        restore_checkpoint(ctx_->cfg().restart_directory());
+    }
 
     print_recap();
 
@@ -330,9 +344,9 @@ void Simulation::Propagate()
     output::stars();
     output::print("        it         percentage                   Elapsed time                    Estimated time    ");
     
-    for (int it = 0; it < iFinalTime; ++it) {
+    for (int it = first_step_; it < iFinalTime; ++it) {
         if (it % 100 == 0) {
-            double est_time_sec= ( omp_get_wtime() - start_time ) / ( double(it) / iFinalTime );
+            double est_time_sec= ( omp_get_wtime() - start_time ) / ( double(it - first_step_) / (iFinalTime - first_step_) );
             int est_time_min=-1.;
             int est_time_h=-1.;
             int est_time_days=-1.;
@@ -375,6 +389,9 @@ void Simulation::Propagate()
     }
 
     output::print(std::string(output::linesize - 5, '*'));
+    if( ctx_->cfg().checkpoint() ) {
+        write_checkpoint(output_.directory() + "/checkpoint");
+    }
 }
 //
 ///// @brief Driver for single time step propagation.

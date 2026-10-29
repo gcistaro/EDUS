@@ -27,6 +27,16 @@ class config_t
         }
         dict_["/tb_file"_json_pointer] = tb_file__;
     }
+    /// If true, the state is saved in Output/checkpoint at the end of the propagation
+    inline auto checkpoint() const
+    {
+        return dict_.at("/checkpoint"_json_pointer).get<bool>();
+    }
+    /// Directory of the checkpoint to restart from (empty: no restart)
+    inline auto restart_directory() const
+    {
+        return dict_.at("/restart_directory"_json_pointer).get<std::string>();
+    }
     /// Fermi energy of the system
     inline auto decay() const
     {

@@ -132,6 +132,9 @@ class Propagator : public CommutatorEquation
         const kGradient& kgradient() const { return *kgradient_; }
         double current_time() const { return lattice_ ? desolver_ehrenfest_.current_time() : desolver_.current_time(); }
         double time_step() const { return parameters_.desolver.dt; }
+        /// Number of time steps done (restart: set the one of the checkpoint)
+        long current_step() const { return lattice_ ? desolver_ehrenfest_.step() : desolver_.step(); }
+        void set_step(const long istep__) { desolver_ehrenfest_.set_step(istep__); desolver_.set_step(istep__); }
         /// Lattice coupled to the electrons, nullptr without phonons
         const phonon::Lattice* lattice() const { return lattice_; }
         Processor processor() const { return processor_; }

@@ -85,6 +85,11 @@ class DESolver
             }
         }
 
+        /// Number of steps done; set_step is for a restart, with the same initial time and dt of the first run,
+        /// so that the times are exactly the same
+        long step() const { return istep_; }
+        void set_step(const long istep__) { istep_ = istep__; }
+
         /* getter methods */
         const T& function() const { return *y_; }
         T& function() { return *y_; }
