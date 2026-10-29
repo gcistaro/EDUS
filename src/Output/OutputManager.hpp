@@ -72,6 +72,7 @@ class OutputManager
         std::ofstream os_energy_;
         std::ofstream os_lattice_;
         std::ofstream os_modes_;
+        std::ofstream os_force_check_;
         std::ofstream os_energy_terms_;
 
         std::string path(const std::string& filename__) const { return parameters_.directory + "/" + filename__; }

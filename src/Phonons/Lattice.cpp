@@ -1051,6 +1051,36 @@ std::vector<double> Lattice::force(const Operator<std::complex<double>>& rho__, 
     return F;
 }
 
+/// @brief Force of the electrons on the lattice computed in k, F_mu = s/N sum_k Tr[g_mu(k) (rho(k) - rho_ref(k))]:
+/// only to check the R formula of force() (with the complex conjugate), on the same density matrices.
+std::vector<double> Lattice::force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
+{
+    auto& rho = rho__.get_Operator(Space::k);
+    auto& rho0 = reference__.get_Operator(Space::k);
+    std::vector<double> F(num_modes_, 0.);
+    for( int mu = 0; mu < num_modes_; ++mu ) {
+        auto& gk = coupling_[mu].get_Operator(Space::k);
+        double sum = 0.;
+        #pragma omp parallel for reduction(+:sum)
+        for( int ik = 0; ik < gk.get_nblocks(); ++ik ) {
+            for( int n = 0; n < num_bands_; ++n ) {
+                for( int m = 0; m < num_bands_; ++m ) {
+                    sum += (gk(ik, n, m) * (rho(ik, m, n) - rho0(ik, m, n))).real();
+                }
+            }
+        }
+        F[mu] = sum;
+    }
+#ifdef EDUS_MPI
+    MPI_Allreduce(MPI_IN_PLACE, F.data(), num_modes_, MPI_DOUBLE, MPI_SUM, comm_->communicator());
+#endif
+    double num_k = coupling_[0].get_Operator(Space::k).get_MeshGrid()->get_TotalSize();
+    for( auto& f : F ) {
+        f *= parameters_.spin_degeneracy / num_k;
+    }
+    return F;
+}
+
 /// @brief Right hand side of the equations of motion of the lattice, written as a first-order system:
 ///     du/dt = v,     dv/dt = -(K u + F)/M - (2/tau) v
 /// Newton's equation M u'' = -K u - F with the harmonic force -K u, the force -F of the electrons and a

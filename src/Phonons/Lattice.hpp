@@ -195,6 +195,9 @@ class Lattice
         /// reference__ (rho0, or rho_BO for the force used in the dynamics):
         /// @f$ F_\mu = s\sum_{\mathbf R}\sum_{mn} g_{\mu,mn}(\mathbf R)\,(\rho-\rho_{\rm ref})_{mn}(\mathbf R)^* @f$
         std::vector<double> force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
+        /// The same force computed directly in k, @f$ F_\mu = \frac{s}{N}\sum_{\mathbf k}\mathrm{Tr}[g_\mu(\mathbf k)(\rho-\rho_{\rm ref})(\mathbf k)] @f$,
+        /// from the k components of rho__ and reference__: check of the R formula of force() (Force_check.txt)
+        std::vector<double> force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
         /// Time derivative of the coordinates for the force F__
         void derivative(Coordinates& dx__, const Coordinates& x__, const std::vector<double>& F__) const;
         /// Kinetic and potential energy of the lattice per unit cell (Ha)

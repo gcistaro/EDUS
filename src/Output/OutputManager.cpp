@@ -81,6 +81,10 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         if( lattice ) {
             int nmodes = lattice->num_modes();
             os_lattice_.open(path("Lattice.txt"));
+            os_force_check_.open(path("Force_check.txt"));
+            os_force_check_ << "# Check of the force on the lattice: F_R = s sum_R sum_mn g_mn(R) conj(rho - rho_BO)_mn(R) (force used in the\n"
+                            << "# dynamics, Lattice.txt) against F_k = s/N sum_k Tr[g(k) (rho - rho_BO)(k)], same density matrices (Ha/bohr)\n"
+                            << "#        time (a.u.)       max_mu |F_R - F_k|          max_mu |F_R|\n";
             bool dynamic = lattice->dynamic_reference();
             os_lattice_ << "# Lattice at q = 0, atomic units, per unit cell (all spin channels), adiabatic reference: "
                         << phonon::to_string(lattice->parameters().adiabatic_reference)
@@ -376,6 +380,24 @@ void OutputManager::print_velocity_energy(const double& time__)
             rho_bo = &rho_bo_;
         }
         force_excited = lattice->force(aux, *rho_bo);
+        /* check of the R formula: the same force directly in k */
+        {
+            auto& ref = const_cast<Operator<std::complex<double>>&>(*rho_bo);
+            if( !dynamic ) {
+                rho_bo_.lock_space(R);
+                rho_bo_.go_to_k();
+            }
+            ref.lock_space(Space::k);
+            auto force_check = lattice->force_k(aux, ref);
+            double diff = 0., norm = 0.;
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                diff = std::max(diff, std::abs(force_excited[mu] - force_check[mu]));
+                norm = std::max(norm, std::abs(force_excited[mu]));
+            }
+            os_force_check_ << std::setw(22) << std::setprecision(12) << time__
+                            << std::setw(22) << std::setprecision(12) << diff
+                            << std::setw(22) << std::setprecision(12) << norm << std::endl;
+        }
     }
     if( meanfield_->parameters().enabled || lattice ) {
         /* self energy + sum_mu u_mu g_mu, computed in R like in the propagation: Sigma[rho-rho0] + u.g_b, or
