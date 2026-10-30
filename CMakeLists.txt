@@ -279,6 +279,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+include(GoogleTest)
 set(EDUS_GTESTS fft batchfft batchgemm axpby timestepper meshgrid)
 foreach(name IN LISTS EDUS_GTESTS)
   add_executable(test_${name} tests/test_${name}.cpp) 
