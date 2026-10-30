@@ -13,16 +13,18 @@ void GridStructure::initialize(const std::array<int,3>& size__, const std::array
     /* Check on the sizes. All must be > 0 */
     for (auto& ix : {0,1,2}) {
         if (size_[ix] <= 0) {
-            throw std::runtime_error("k/R grid size must be positive. \n
-                                     k grid size: [" + std::to_string(size_[0]) + 
-                                     ", " + std::to_string(size_[1]) + 
-                                     ", " + std::to_string(size_[2]) + "]\n");
+            std::stringstream ss;
+            ss << "k/R grid size must be positive. \n"
+               << "k grid size: [" << size_[0] << ", " 
+               << size_[1] << ", " << size_[2] << "]\n";
+            throw std::runtime_error(ss.str());
         }
         if (qsize_[ix] <= 0) {
-            throw std::runtime_error("q grid size must be positive. \n
-                                     q grid size: [" + std::to_string(qsize_[0]) + 
-                                     ", " + std::to_string(qsize_[1]) + 
-                                     ", " + std::to_string(qsize_[2]) + "]\n");
+            std::stringstream ss;
+            ss << "q grid size must be positive. \n"
+               << "q grid size: [" << qsize_[0] << ", " 
+               << qsize_[1] << ", " << qsize_[2] << "]\n";
+            throw std::runtime_error(ss.str());
         }
     }
     R_ = std::make_shared<MeshGrid>(MeshGrid(R, size__));
@@ -35,15 +37,25 @@ void GridStructure::initialize(const std::array<int,3>& size__, const std::array
     /* Supercell simulations -- check that q grid is commensurate with k grid */
     for (auto& ix : {0,1,2}) {
         if (size_[ix] % qsize_[ix] != 0) {
-            throw std::runtime_error("q grid is not commensurate with k grid. \n"+
-                                     "k grid size: [" + std::to_string(size_[0]) + 
-                                     ", " + std::to_string(size_[1]) + 
-                                     ", " + std::to_string(size_[2]) + "]\n"+
-                                     "q grid size: [" + std::to_string(qsize_[0]) + 
-                                     ", " + std::to_string(qsize_[1]) + 
-                                     ", " + std::to_string(qsize_[2]) + "]  \n");
+            std::stringstream ss;
+            ss << "q grid is not commensurate with k grid. \n"
+               << "k grid size: [" << size_[0] << ", " << size_[1] << ", " << size_[2] << "]\n"
+               << "q grid size: [" << qsize_[0] << ", " << qsize_[1] << ", " << qsize_[2] << "]  \n";
+            throw std::runtime_error(ss.str());
         }
     }
+    q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__));
+
+    /* Supercell simulations -- check that q grid is commensurate with k grid */
+    for (auto& ix : {0,1,2}) {
+        if (size_[ix] % qsize_[ix] != 0) {
+            std::stringstream ss;
+            ss << "q grid is not commensurate with k grid. \n"
+               << "k grid size: [" << size_[0] << ", " << size_[1] << ", " << size_[2] << "]\n"
+               << "q grid size: [" << qsize_[0] << ", " << qsize_[1] << ", " << qsize_[2] << "]  \n";
+            throw std::runtime_error(ss.str());
+        }
+    }       
     q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__));
 }
 
