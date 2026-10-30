@@ -298,7 +298,18 @@ int MeshGrid::find(const Coordinate& v, int start_index) const
                     notcart[ix]= (notcart[ix]-(Size[ix]==1 ? 0. : shift_k) )*Size[ix];
                 }
             } 
-            index = int(round(notcart[2] + Size[2] * (notcart[1] + Size[1] * notcart[0])));//warning! round is important, if not it will get the integer part, usually wrong.
+            /* v must be a point of the grid: integer coordinates in units of the grid spacing.
+            The integers are taken modulo Size: a point just below the upper edge of the cell rounds
+            to Size and is the point 0 */
+            std::array<int,3> n;
+            for ( auto& ix : { 0, 1, 2 } ) {
+                double rounded = std::round(notcart[ix]);
+                if ( std::abs(notcart[ix] - rounded) > 1.e-06 ) {
+                    return -1;
+                }
+                n[ix] = ( ( int(rounded) % Size[ix] ) + Size[ix] ) % Size[ix];
+            }
+            index = n[2] + Size[2] * (n[1] + Size[1] * n[0]);            
             break;
 	    }
         case sphere:
