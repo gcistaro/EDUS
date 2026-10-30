@@ -14,11 +14,15 @@ private:
     std::shared_ptr<MeshGrid> RGamma_;
     /// @brief k grid, where all the operators are defined
     std::shared_ptr<MeshGrid> k_;
+    /// @brief q grid for supercell simulations
+    std::shared_ptr<MeshGrid> q_;
+    /// @brief Size of the q grid on each direction, for supercell simulations
+    std::array<int,3> qsize_;
 
 public: 
     GridStructure() = default;
-    explicit GridStructure(const std::array<int,3>& size__);
-    void initialize(const std::array<int,3>& size__);
+    explicit GridStructure(const std::array<int,3>& size__, const std::array<int,3>& qsize__ = {1,1,1});
+    void initialize(const std::array<int,3>& size__, const std::array<int,3>& qsize__ = {1,1,1});
     void print_recap() const;
 
     /* getter functions */
@@ -26,6 +30,7 @@ public:
     const std::shared_ptr<MeshGrid>& Rgrid() const {return R_;};
     const std::shared_ptr<MeshGrid>& Rgrid_GammaCentered() const {return RGamma_;};
     const std::shared_ptr<MeshGrid>& kgrid() const {return k_;};
+    const std::shared_ptr<MeshGrid>& qgrid() const {return q_;};
 };
 
 #endif 

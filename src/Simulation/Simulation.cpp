@@ -36,7 +36,7 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
     //TODO: remove next line, static variable
     Operator<std::complex<double>>::SpaceOfPropagation = k;
 
-    gridstructure_.initialize(ctx_->cfg().grid());
+    gridstructure_.initialize(ctx_->cfg().grid(), ctx_->cfg().qgrid());
     decomposition_.initialize(ctx_->cfg().grid(), num_bands_, mpi::Communicator::world().size());
     kgradient_.initialize( propagator_parameters.gradient_space == R ? *gridstructure_.Rgrid() : *gridstructure_.kgrid() );
     electrons_.initialize(material, gridstructure_, decomposition_.mpindex(), kgradient_, 

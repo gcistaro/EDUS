@@ -158,6 +158,20 @@
             ],
             "title": "Dimension of the k grid (R as well) used for the simulation"
         },
+        "qgrid": {
+            "type": "array",
+            "items": {
+                "type": "integer"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "default": [
+                1,
+                1,
+                1
+            ],
+            "title": "Dimension of the q grid used for the simulation"
+        },
         "filledbands": {
             "type": "integer",
             "default": 0,

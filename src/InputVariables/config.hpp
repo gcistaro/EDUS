@@ -255,6 +255,18 @@ class config_t
         }
         dict_["/grid"_json_pointer] = grid__;
     }
+    /// Dimension of the q grid used for the simulation
+    inline auto qgrid() const
+    {
+        return dict_.at("/qgrid"_json_pointer).get<std::array<int, 3>>();
+    }
+    inline void qgrid(std::array<int, 3> qgrid__)
+    {
+        if (dict_.contains("locked")) {
+            throw std::runtime_error(locked_msg);
+        }
+        dict_["/qgrid"_json_pointer] = qgrid__;
+    }
     /// Number of filled bands for the simulation (ideally will be either this of fermienergy
     inline auto filledbands() const
     {
