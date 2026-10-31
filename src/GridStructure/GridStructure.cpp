@@ -44,19 +44,8 @@ void GridStructure::initialize(const std::array<int,3>& size__, const std::array
             throw std::runtime_error(ss.str());
         }
     }
-    q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__));
-
-    /* Supercell simulations -- check that q grid is commensurate with k grid */
-    for (auto& ix : {0,1,2}) {
-        if (size_[ix] % qsize_[ix] != 0) {
-            std::stringstream ss;
-            ss << "q grid is not commensurate with k grid. \n"
-               << "k grid size: [" << size_[0] << ", " << size_[1] << ", " << size_[2] << "]\n"
-               << "q grid size: [" << qsize_[0] << ", " << qsize_[1] << ", " << qsize_[2] << "]  \n";
-            throw std::runtime_error(ss.str());
-        }
-    }       
-    q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__));
+    /* the q grid is not distributed among the ranks */
+    q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__, 0., false));
 }
 
 

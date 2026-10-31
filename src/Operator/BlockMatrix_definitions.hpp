@@ -1,31 +1,49 @@
 template<typename T>
-Matrix<T> BlockMatrix<T>::EmptyMatrix = Matrix<T>();
+Matrix<T> BlockMatrix<T>::empty_matrix_ = Matrix<T>();
 
 template<typename T>
-void BlockMatrix<T>::initialize(const Space& space, mdarray<T,3>& Values_)//, MeshGrid& meshgrid_)
+void BlockMatrix<T>::initialize(const Space& space__, mdarray<T,4>& values__)//, MeshGrid& meshgrid_)
 {
-    this->initialize(space, Values_.get_Size()[0], Values_.get_Size()[1], Values_.get_Size()[2]);
-    std::copy(Values_.begin(), Values_.end(), Values.begin());
-    //Values = std::move(Values_);
-    //meshgrid = std::make_shared<MeshGrid>(meshgrid_);
+    this->initialize(space__, values__.get_Size()[0], 
+                            values__.get_Size()[2],
+                            values__.get_Size()[3], 
+                            0, 
+                            values__.get_Size()[1] 
+    );
+    std::copy(values__.begin(), values__.end(), values_.begin());
+    //values_ = std::move(Values_);
+    //meshgrid_ = std::make_shared<MeshGrid>(meshgrid_);
+}
+
+template<typename T>
+void BlockMatrix<T>::initialize(const Space& space__, mdarray<T,3>& values__)
+{
+    this->initialize(space__, values__.get_Size(0), values__.get_Size(1), values__.get_Size(2), 0, 1);
+    std::copy(values__.begin(), values__.end(), values_.begin());
 }
 
 template<typename T>
 void BlockMatrix<T>::initialize_submatrix()
 {
-        submatrix.resize(Values.get_Size(0));
+        submatrix_.resize(get_nblocks());
 
-        for(auto iblock=0; iblock<Values.get_Size(0); iblock++){
-            submatrix[iblock] =Matrix<T>(&(Values(iblock,0,0)),{Values.get_Size(1), Values.get_Size(2)});    
+        for(int ik=0; ik<get_nk(); ik++){
+            for(int iq=0; iq<get_nq(); iq++){
+                submatrix_[ik*get_nq()+iq] = Matrix<T>(&(values_(ik,iq,0,0)),{get_nrows(), get_ncols()});
+            }
         }
 }
 
 
 template<typename T>
-void BlockMatrix<T>::initialize(const Space& space__, const int& nblocks, const int& nrows, const int& ncols, const int& real_dims__)
+void BlockMatrix<T>::initialize(const Space& space__, int nk__, 
+                                                      int nrows__, 
+                                                      int ncols__, 
+                                                      int real_dims__,
+                                                      int nq__)
 {
-    Values.initialize({nblocks, nrows, ncols}, real_dims__);
-    space = space__;
+    values_.initialize({nk__, nq__, nrows__, ncols__}, real_dims__);
+    space_ = space__;
     initialize_submatrix();
 }
 
@@ -38,7 +56,7 @@ void BlockMatrix<T>::test_submatrix()
 
         for(int ir=0; ir<this->get_nrows(); ir++){
             for(int ic=0; ic<this->get_ncols(); ic++){
-                assert( &((*this)(ib,ir,ic)) == &(this->submatrix[ib](ir,ic)) );
+                assert( &((*this)(ib,ir,ic)) == &(this->submatrix_[ib](ir,ic)) );
             }
         }
     }
@@ -46,169 +64,185 @@ void BlockMatrix<T>::test_submatrix()
 
 
 template<typename T>
-BlockMatrix<T>::BlockMatrix(const BlockMatrix<T>& A)
+BlockMatrix<T>::BlockMatrix(const BlockMatrix<T>& a__)
 {
-    *this = A;
+    *this = a__;
 }
 
 template<typename T>
-inline const T& BlockMatrix<T>::operator()(const int& iblock, const int& n, const int& m) const
+inline const T& BlockMatrix<T>::operator()(const int& iblock__, const int& n__, const int& m__) const
 {
-    if(iblock == -1){
-        return NullValue;
+    if(iblock__ == -1){
+        return null_value_;
     }
-    return this->Values(iblock, n, m);
+    /* flat block index iblock = ik*nq + iq */
+    return this->values_.data()[(iblock__*get_nrows() + n__)*get_ncols() + m__];
 }
 
 template<typename T>
-inline T& BlockMatrix<T>::operator()(const int& iblock, const int& n, const int& m)
+inline T& BlockMatrix<T>::operator()(const int& iblock__, const int& n__, const int& m__)
 {
-    return (const_cast<T&>(const_cast<BlockMatrix<T> const&>(*this)(iblock, n, m)));
+    return (const_cast<T&>(const_cast<BlockMatrix<T> const&>(*this)(iblock__, n__, m__)));
 }
 
 template<typename T>
-inline T& BlockMatrix<T>::operator()(const int& i)
+inline const T& BlockMatrix<T>::operator()(const int& ik__, const int& iq__, const int& n__, const int& m__) const
 {
-    return this->Values[i];
+    return this->values_(ik__, iq__, n__, m__);
 }
 
 template<typename T>
-inline const T& BlockMatrix<T>::operator()(const int& i) const
+inline T& BlockMatrix<T>::operator()(const int& ik__, const int& iq__, const int& n__, const int& m__)
 {
-    return (const_cast<T&>(const_cast<BlockMatrix<T> const&>(*this)(i)));
+    return (const_cast<T&>(const_cast<BlockMatrix<T> const&>(*this)(ik__, iq__, n__, m__)));
 }
 
 template<typename T>
-BlockMatrix<T>& BlockMatrix<T>::operator=(const BlockMatrix<T>& A)
+inline T& BlockMatrix<T>::operator()(const int& i__)
 {
-    Values = A.Values;
-    space = A.space;
+    return this->values_[i__];
+}
+
+template<typename T>
+inline const T& BlockMatrix<T>::operator()(const int& i__) const
+{
+    return (const_cast<T&>(const_cast<BlockMatrix<T> const&>(*this)(i__)));
+}
+
+template<typename T>
+BlockMatrix<T>& BlockMatrix<T>::operator=(const BlockMatrix<T>& a__)
+{
+    values_ = a__.values_;
+    space_ = a__.space_;
     initialize_submatrix();
-    meshgrid = A.meshgrid;
+    meshgrid_ = a__.meshgrid_;
     return *this;
 }
 
 template<typename T>
-BlockMatrix<T>::BlockMatrix(BlockMatrix<T>&& A)
+BlockMatrix<T>::BlockMatrix(BlockMatrix<T>&& a__)
 {
-    Values = std::move(A.Values);
-    space = std::move(A.space);
+    values_ = std::move(a__.values_);
+    space_ = std::move(a__.space_);
     initialize_submatrix();
-    meshgrid = std::move(A.meshgrid);
+    meshgrid_ = std::move(a__.meshgrid_);
 }
 
 
 template<typename T>
-BlockMatrix<T>& BlockMatrix<T>::operator=(BlockMatrix<T>&& A)
+BlockMatrix<T>& BlockMatrix<T>::operator=(BlockMatrix<T>&& a__)
 {
-    Values = std::move(A.Values);
-    space = std::move(A.space);
+    values_ = std::move(a__.values_);
+    space_ = std::move(a__.space_);
     initialize_submatrix();
-    meshgrid = std::move(A.meshgrid);
+    meshgrid_ = std::move(a__.meshgrid_);
     return *this;
 }
 
 template<typename T>
-void BlockMatrix<T>::fill(const T& Scalar)
+void BlockMatrix<T>::fill(const T& scalar__)
 {
 #ifdef EDUS_TIMERS
     PROFILE("BlockMatrix::fill");
 #endif
-    Values.fill(Scalar);
-// ==     std::fill(this->Values.begin(), this->Values.end(), Scalar);
+    values_.fill(scalar__);
+// ==     std::fill(this->values_.begin(), this->values_.end(), Scalar);
 }
 
 template<class T>
-void copy(const BlockMatrix<T>& ToCopy__, BlockMatrix<T>& ToBeCopied__, const Processor& proc__)
+void copy(const BlockMatrix<T>& to_copy__, BlockMatrix<T>& to_be_copied__, const Processor& proc__)
 {
-    copy(ToCopy__.Values, ToBeCopied__.Values, proc__);
+    copy(to_copy__.values_, to_be_copied__.values_, proc__);
 }
 
 
 template<typename T>
-Matrix<T>& BlockMatrix<T>::operator[](const int& iblock)
+Matrix<T>& BlockMatrix<T>::operator[](const int& iblock__)
 {
-    return const_cast<Matrix<T>&>(const_cast<const BlockMatrix<T>&>(*this)[iblock]);
+    return const_cast<Matrix<T>&>(const_cast<const BlockMatrix<T>&>(*this)[iblock__]);
 }
 
 template<typename T>
-const Matrix<T>& BlockMatrix<T>::operator[](const int& iblock) const
+const Matrix<T>& BlockMatrix<T>::operator[](const int& iblock__) const
 {
-    if(iblock < 0){
-        return EmptyMatrix;
+    if(iblock__ < 0){
+        return empty_matrix_;
     }
-    return submatrix[iblock];
+    return submatrix_[iblock__];
 }
 
 template<typename T>
-Matrix<T>& BlockMatrix<T>::operator[](const Coordinate& Point)
+Matrix<T>& BlockMatrix<T>::operator[](const Coordinate& point__)
 {
-    return const_cast<Matrix<T>&>(const_cast<const BlockMatrix<T>&>(*this)[Point]);
+    return const_cast<Matrix<T>&>(const_cast<const BlockMatrix<T>&>(*this)[point__]);
 }
 
 template<typename T>
-const Matrix<T>& BlockMatrix<T>::operator[](const Coordinate& Point) const
+const Matrix<T>& BlockMatrix<T>::operator[](const Coordinate& point__) const
 {
-    int iblock = (*meshgrid).find(Point);
+    if( this->get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::operator[](Coordinate): not implemented for nq > 1");
+    }
+    int iblock = (*meshgrid_).find(point__);
     return (*this)[iblock];
 }
 
 
 template<typename T>
-void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, const Processor& proc__ )
+void multiply(BlockMatrix<T>& output__, T scalar__, const BlockMatrix<T>& input1__, const BlockMatrix<T>& input2__, const Processor& proc__ )
 {
-    multiply(Output, Scalar, Input1, Input2, T(0.), proc__);
+    multiply(output__, scalar__, input1__, input2__, T(0.), proc__);
 }
 
 template<typename T>
-void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2, T Scalar2, const Processor& proc__ )
+void multiply(BlockMatrix<T>& output__, T scalar__, const BlockMatrix<T>& input1__, const BlockMatrix<T>& input2__, T scalar2__, const Processor& proc__ )
 {
-    assert(Output.get_nblocks() == Input1.get_nblocks() && Input1.get_nblocks() == Input2.get_nblocks());
+    assert(output__.get_nblocks() == input1__.get_nblocks() && input1__.get_nblocks() == input2__.get_nblocks());
 #ifdef EDUS_GPU
     if(proc__ == device) {
-        const_cast<BlockMatrix<std::complex<double>>&>(Input1).transfer_to(device);
-        const_cast<BlockMatrix<std::complex<double>>&>(Input2).transfer_to(device);
-        static auto stride = Output.get_nblocks();
-        static auto m = Output.get_nrows();
-        static auto n = Output.get_ncols();
-        static auto k = Input1.get_ncols();
+        const_cast<BlockMatrix<std::complex<double>>&>(input1__).transfer_to(device);
+        const_cast<BlockMatrix<std::complex<double>>&>(input2__).transfer_to(device);
+        auto stride = output__.get_nblocks();
+        auto m = output__.get_nrows();
+        auto n = output__.get_ncols();
+        auto k = input1__.get_ncols();
          cublasZgemmStridedBatched(
              cublas_handle,
              CUBLAS_OP_N, CUBLAS_OP_N, 
              n, m, k,
-             reinterpret_cast<const cuDoubleComplex*>(&Scalar),             
-             reinterpret_cast<const cuDoubleComplex*>(Input2.data(device)),
+             reinterpret_cast<const cuDoubleComplex*>(&scalar__),             
+             reinterpret_cast<const cuDoubleComplex*>(input2__.data(device)),
              n,                 
              k * n,             
-             reinterpret_cast<const cuDoubleComplex*>(Input1.data(device)),
+             reinterpret_cast<const cuDoubleComplex*>(input1__.data(device)),
              k,                    
              m * k,                
-             reinterpret_cast<const cuDoubleComplex*>(&Scalar2),
-             reinterpret_cast<cuDoubleComplex*>(Output.data(device)),
+             reinterpret_cast<const cuDoubleComplex*>(&scalar2__),
+             reinterpret_cast<cuDoubleComplex*>(output__.data(device)),
              n,                    
              m * n,                
              stride);
-        Output.transfer_to(host);
+        output__.transfer_to(host);
 ///== debug        std::cout <<"multiply max GPU: "<< *max(Output) << std::endl;
-        Output.set_processor(device);
+        output__.set_processor(device);
         return;
     }
 #endif
 #ifdef EDUS_BATCHGEMM
-    static auto stride = Output.get_nblocks();
-    static auto m = Output.get_nrows();
-    static auto n = Output.get_ncols();
-    static auto k = Input1.get_ncols();
-    assert( k == Input1.get_ncols() );
-    assert( n == Input2.get_ncols() );
-    assert( m == Input1.get_nrows() );
+    auto stride = output__.get_nblocks();
+    auto m = output__.get_nrows();
+    auto n = output__.get_ncols();
+    auto k = input1__.get_ncols();
+    assert( k == input1__.get_ncols() );
+    assert( n == input2__.get_ncols() );
+    assert( m == input1__.get_nrows() );
     cblas_zgemm_batch_strided( CblasRowMajor, CblasNoTrans, CblasNoTrans,
-    m, n, k, &Scalar, &Input1(0,0,0), k, m*k, &Input2(0,0,0), n, k*n, &Scalar2,
-    &Output(0,0,0), n, m*n, stride);
+    m, n, k, &scalar__, &input1__(0,0,0), k, m*k, &input2__(0,0,0), n, k*n, &scalar2__,
+    &output__(0,0,0), n, m*n, stride);
 #else 
     #pragma omp parallel for schedule(static)
-    for(int iblock=0; iblock<Output.get_nblocks(); iblock++){
-        Matrix_gemm(Output[iblock], Scalar, Input1[iblock], Input2[iblock], Scalar2);
+    for(int iblock=0; iblock<output__.get_nblocks(); iblock++){
+        Matrix_gemm(output__[iblock], scalar__, input1__[iblock], input2__[iblock], scalar2__);
     }
 ///== debug    std::cout <<"multiply max: "<< *max(Output) << std::endl;
 #endif
@@ -216,49 +250,52 @@ void multiply(BlockMatrix<T>& Output, T Scalar, const BlockMatrix<T>& Input1, co
 
 
 template<typename T, typename U>
-void convolution(BlockMatrix<T>& Output, U Scalar, const BlockMatrix<T>& Input1, const BlockMatrix<T>& Input2 )
+void convolution(BlockMatrix<T>& output__, U scalar__, const BlockMatrix<T>& input1__, const BlockMatrix<T>& input2__ )
 {
-    assert(Output.get_nblocks()!=0);
+    if( output__.get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::convolution: not implemented for nq > 1");
+    }
+    assert(output__.get_nblocks()!=0);
 
     //Output.fill(0.);
-    auto& ci = MeshGrid::ConvolutionIndex[{Output.meshgrid->get_id(), Input1.meshgrid->get_id(), Input2.meshgrid->get_id()}];
+    auto& ci = MeshGrid::ConvolutionIndex[{output__.meshgrid_->get_id(), input1__.meshgrid_->get_id(), input2__.meshgrid_->get_id()}];
 
     if(ci.get_Size(0) == 0 ){
-        MeshGrid::Calculate_ConvolutionIndex(*(Output.meshgrid), *(Input1.meshgrid), *(Input2.meshgrid));
+        MeshGrid::Calculate_ConvolutionIndex(*(output__.meshgrid_), *(input1__.meshgrid_), *(input2__.meshgrid_));
 
     }
     PROFILE_START("BlockMatrix::convolution");
 
     #pragma omp parallel for schedule(static)
-    for(int iblock_o=0; iblock_o<Output.get_nblocks(); iblock_o++){
-        for(int iblock_i2=0; iblock_i2<Input2.get_nblocks(); iblock_i2++){
+    for(int iblock_o=0; iblock_o<output__.get_nblocks(); iblock_o++){
+        for(int iblock_i2=0; iblock_i2<input2__.get_nblocks(); iblock_i2++){
             auto& iblock_i1 = ci(iblock_o, iblock_i2);
-            Matrix_gemm(Output[iblock_o], Scalar+im*0., Input1[iblock_i1], Input2[iblock_i2], 1.+im*0.);
+            Matrix_gemm(output__[iblock_o], scalar__+im*0., input1__[iblock_i1], input2__[iblock_i2], 1.+im*0.);
         }
     }
     PROFILE_STOP("BlockMatrix::convolution");
 }
 
 template<typename T_, typename U>
-void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1, const BlockMatrix<T_>& Input2, const bool& Erase_Output, const Processor& proc__)
+void commutator(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& input1__, const BlockMatrix<T_>& input2__, const bool& erase_output__, const Processor& proc__)
 {
 #ifdef EDUS_TIMERS
     PROFILE("Commutator");
 #endif
-    assert( Output.get_space() == Input1.get_space() );
-    assert( Input2.get_space() == Input1.get_space() );
+    assert( output__.get_space() == input1__.get_space() );
+    assert( input2__.get_space() == input1__.get_space() );
 
-    switch( Output.get_space() ){
+    switch( output__.get_space() ){
         case(R):
         {
-            convolution(Output, Scalar, Input1, Input2);
-            convolution(Output, -Scalar, Input2, Input1);
+            convolution(output__, scalar__, input1__, input2__);
+            convolution(output__, -scalar__, input2__, input1__);
             break;
         }
         case(k):
         {
-            multiply(Output, Scalar, Input1, Input2, double(!Erase_Output) + im*0., proc__);
-            multiply(Output, -Scalar, Input2, Input1, 1.+im*0., proc__);
+            multiply(output__, scalar__, input1__, input2__, double(!erase_output__) + im*0., proc__);
+            multiply(output__, -scalar__, input2__, input1__, 1.+im*0., proc__);
             break;
         }
     }
@@ -266,23 +303,29 @@ void commutator(BlockMatrix<T_>& Output, U Scalar, const BlockMatrix<T_>& Input1
 
 
 template<typename T>
-void BlockMatrix<T>::diagonalize(std::vector<mdarray<double,1>>& Eigenvalues,
-                 BlockMatrix<std::complex<double>>& Eigenvectors) const
+void BlockMatrix<T>::diagonalize(std::vector<mdarray<double,1>>& eigenvalues__,
+                 BlockMatrix<std::complex<double>>& eigenvectors__) const
 {
+    if( this->get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::diagonalize: not implemented for nq > 1");
+    }
     //assert(space_ == k);
-    Eigenvectors.initialize(k, this->get_nblocks(), this->get_nrows(), this->get_ncols());
-    Eigenvalues.resize(this->get_nblocks());
+    eigenvectors__.initialize(k, this->get_nblocks(), this->get_nrows(), this->get_ncols());
+    eigenvalues__.resize(this->get_nblocks());
     #pragma omp parallel for
     for(int ik=0; ik<this->get_nblocks(); ik++){
-        Eigenvalues[ik].initialize({this->get_nrows()});
-        ((*this)[ik]).diagonalize(Eigenvectors[ik], Eigenvalues[ik]);
+        eigenvalues__[ik].initialize({this->get_nrows()});
+        ((*this)[ik]).diagonalize(eigenvectors__[ik], eigenvalues__[ik]);
     }
 }
 
 template<typename T>
 bool BlockMatrix<T>::is_hermitian()
 {
-    assert(space == k);
+    if( this->get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::is_hermitian: not implemented for nq > 1");
+    }
+    assert(space_ == k);
     bool hermitian = true;
     for(int ik=0; ik<this->get_nblocks(); ++ik) {
         for( int irow=0; irow<this->get_nrows(); irow++ ) {
@@ -297,8 +340,11 @@ bool BlockMatrix<T>::is_hermitian()
 template<typename T>
 void BlockMatrix<T>::make_hermitian()
 {
+    if( this->get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::make_hermitian: not implemented for nq > 1");
+    }
     PROFILE("make_hermitian");
-    switch(space) 
+    switch(space_) 
     {
         case(Space::k) :
         {
@@ -325,8 +371,11 @@ void BlockMatrix<T>::make_hermitian()
 template<typename T>
 void BlockMatrix<T>::make_dagger()
 {
+    if( this->get_nq() > 1 ) {
+        throw std::runtime_error("BlockMatrix::make_dagger: not implemented for nq > 1");
+    }
     PROFILE("make_dagger");
-    switch(space) 
+    switch(space_) 
     {
         case(Space::k) :
         {
@@ -373,7 +422,7 @@ void BlockMatrix<T>::cut(const double& threshold__)
     for(int ik=0; ik<this->get_nblocks(); ++ik) {
         for( int irow=0; irow<this->get_nrows(); irow++ ) {
             for(int icol=irow; icol < this->get_nrows(); ++icol ) {
-                (*this)(ik,irow,icol) = ( std::abs( (*this)(ik,irow,icol) ) > threshold ? (*this)(ik,irow,icol) : 0.);
+                (*this)(ik,irow,icol) = ( std::abs( (*this)(ik,irow,icol) ) > threshold__ ? (*this)(ik,irow,icol) : 0.);
             }
         }
     }
@@ -397,7 +446,7 @@ void BlockMatrix<T>::write_h5(const std::string& name__, const std::string& node
 #else
 #ifdef EDUS_MPI
     MPI_Request req;
-    static BlockMatrix<T> aux_(this->space, this->get_nblocks(), this->get_nrows(), this->get_ncols());
+    BlockMatrix<T> aux_(this->space_, this->get_nk(), this->get_nrows(), this->get_ncols(), 0, this->get_nq());
     comm__.isend(&((*this)(0,0,0)), 0, this->get_TotalSize(),req);
     if( comm__.rank() == 0 ) {
         for(int ik_rank = 0; ik_rank < comm__.size(); ++ik_rank) {
@@ -428,7 +477,7 @@ void BlockMatrix<T>::load(const std::string& name__, const int& node__, const st
     HDF5_tree fout(name__, hdf5_access_t::read_write);
 
     MPI_Request req;
-    static BlockMatrix<T> aux_(this->space, this->get_nblocks(), this->get_nrows(), this->get_ncols());
+    BlockMatrix<T> aux_(this->space_, this->get_nk(), this->get_nrows(), this->get_ncols(), 0, this->get_nq());
 #ifdef EDUS_MPI
     if( comm__.rank() == 0 ) {
         for(int ik_rank = 0; ik_rank < comm__.size(); ++ik_rank) {
@@ -451,39 +500,39 @@ void BlockMatrix<T>::load(const std::string& name__, const int& node__, const st
 template<typename T>
 void BlockMatrix<T>::initialize_device()
 {
-    Values.initialize_device();
+    values_.initialize_device();
 }
 
 template<typename T>
 void BlockMatrix<T>::transfer_to(const Processor& proc__)
 {
-    Values.transfer_to(proc__);
+    values_.transfer_to(proc__);
 }
 
 template<typename T>
-auto max(const BlockMatrix<T>& m)
+auto max(const BlockMatrix<T>& m__)
 {
-    return std::max_element(m.begin(), m.end(), [&](const T& a1, const T& a2){ return std::abs(a1) < std::abs(a2);});
+    return std::max_element(m__.begin(), m__.end(), [&](const T& a1, const T& a2){ return std::abs(a1) < std::abs(a2);});
 }
 
 template<class T>
-std::ostream& operator<<(std::ostream& os, const BlockMatrix<T>& m)
+std::ostream& operator<<(std::ostream& os__, const BlockMatrix<T>& m__)
 {
-    for(int i=0; i<m.get_nblocks(); i++){
-        os << i << " " << (*((const_cast<BlockMatrix<T>&>(m)).get_MeshGrid()))[i].get(LatticeVectors(m.get_space())) << m[i] << std::endl;
+    for(int i=0; i<m__.get_nblocks(); i++){
+        os__ << i << " " << (*((const_cast<BlockMatrix<T>&>(m__)).get_MeshGrid()))[i].get(LatticeVectors(m__.get_space())) << m__[i] << std::endl;
     }
-    return os;
+    return os__;
 }
 
 template<class T>
 template<typename U>
-void BlockMatrix<T>::Divide(const U& Divisors__)
+void BlockMatrix<T>::Divide(const U& divisors__)
 {
     #pragma omp parallel for
     for( int iblock=0; iblock<this->get_nblocks(); iblock++ ) {
         for( int irow = 0; irow < this->get_nrows(); irow++ ) {
             for( int icol = 0; icol < this->get_ncols(); icol++ ) {
-                (*this)(iblock,irow,icol) /= Divisors__[iblock];
+                (*this)(iblock,irow,icol) /= divisors__[iblock];
             }
         }
     }

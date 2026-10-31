@@ -58,9 +58,9 @@ mesh(ReadMesh), type(read_), space(space__)
     id = counter_id;
 }
 
-MeshGrid::MeshGrid(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__)
+MeshGrid::MeshGrid(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__, const bool distributed__)
 {
-    this->initialize(space__, Size__, shiftk__);
+    this->initialize(space__, Size__, shiftk__, distributed__);
 }
 
 MeshGrid::MeshGrid(const Space& space__, const mdarray<double,2>& bare_mg, const std::string& KeyForBasis)
@@ -98,7 +98,7 @@ void MeshGrid::initialize(const Space& space__, const std::vector<Coordinate>& P
     TotalSize = mesh.size();
 }
 
-void MeshGrid::initialize(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__)
+void MeshGrid::initialize(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__, const bool distributed__)
 {
     //cubic grids are always [0, Size-1] so that are fft friendly
     id = ++counter_id;
@@ -147,7 +147,10 @@ void MeshGrid::initialize(const Space& space__, const std::array<int,3>& Size__,
             break;
         }
     }
-    mpindex.initialize(this->get_Size());
+    /* grids that are not split among the ranks (e.g. the q grid) do not need mpindex */
+    if( distributed__ ) {
+        mpindex.initialize(this->get_Size());
+    }
 }
 
 void MeshGrid::initialize(const Space& space__, const mdarray<double,2>& bare_mg, const std::string& KeyForBasis)

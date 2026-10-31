@@ -61,11 +61,11 @@ class MeshGrid
 
         MeshGrid(const Space& space__, const std::vector<Coordinate>& ReadMesh); 
         MeshGrid(const Space& space__, const mdarray<double,2>& bare_mg, const std::string& KeyForBasis);
-        MeshGrid(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__=0.);
+        MeshGrid(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__=0., const bool distributed__=true);
         MeshGrid(const Space& space__, const double& Radius_, const std::array<double, 3>& resolution = {1., 1., 1.});
         MeshGrid(const Space& space__, const std::vector<Coordinate>& PathPoints, const double& resolution);
 
-        void initialize(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__=0.);
+        void initialize(const Space& space__, const std::array<int,3>& Size__, const double& shiftk__=0., const bool distributed__=true);
         void initialize(const Space& space__, const double& Radius_, const std::array<double, 3>& resolution = {1., 1., 1.});
         void initialize(const Space& space__, const mdarray<double,2>& bare_mg, const std::string& KeyForBasis);
         void initialize(const Space& space__, const std::vector<Coordinate>& PathPoints, const double& resolution);
