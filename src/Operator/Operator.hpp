@@ -98,6 +98,7 @@ class Operator
         mdarray<std::complex<double>, 2> FTfriendly_Operator_k;
         std::shared_ptr<MeshGrid> FT_meshgrid_k;
         std::shared_ptr<MeshGrid> FT_meshgrid_R;
+        std::shared_ptr<MeshGrid> FT_meshgrid_q = nullptr;
 
         //static BandIndex bandindex;
         static MultiIndex<2> bandindex;
@@ -110,7 +111,8 @@ class Operator
         bool initialized_fft = false;
         FourierTransform ft_;
         Processor processor_ = host;
-
+        /// MPIindex used to allocate this operator (howmany = nq*nb*nb); by default the static one (nq = 1)
+        const MPIindex<3>* mpindex_ptr_ = &mpindex;
         std::string tagname = "";
 
 
@@ -130,18 +132,20 @@ class Operator
             (*this) = Op_;
         };
 
-        Operator<T>& operator=(const Operator<T>& Op_) 
+        Operator<T>& operator=(const Operator<T>& Op__) 
         {
-            this->Operator_k = Op_.get_Operator(k);
-            this->Operator_R = Op_.get_Operator(R);
-            this->FTfriendly_Operator_R = Op_.FTfriendly_Operator_R;
-            this->FTfriendly_Operator_k = Op_.FTfriendly_Operator_k;
-            this->bandgauge = Op_.bandgauge;
-            this->space = Op_.space;
-            this->SpaceOfPropagation = Op_.SpaceOfPropagation;
-            this->locked_bandgauge = Op_.locked_bandgauge;
-            this->locked_space = Op_.locked_space;
-            //this->ft_ = Op_.ft_; //Warning!! Never copy ft!! is deleted anyway
+            this->Operator_k = Op__.get_Operator(k);
+            this->Operator_R = Op__.get_Operator(R);
+            this->FTfriendly_Operator_R = Op__.FTfriendly_Operator_R;
+            this->FTfriendly_Operator_k = Op__.FTfriendly_Operator_k;
+            this->bandgauge = Op__.bandgauge;
+            this->space = Op__.space;
+            this->SpaceOfPropagation = Op__.SpaceOfPropagation;
+            this->locked_bandgauge = Op__.locked_bandgauge;
+            this->locked_space = Op__.locked_space;
+            this->mpindex_ptr_ = Op__.mpindex_ptr_;
+            this->FT_meshgrid_q = Op__.FT_meshgrid_q;
+            //this->ft_ = Op__.ft_; //Warning!! Never copy ft!! is deleted anyway
             return *this;
         }
         
@@ -201,96 +205,38 @@ class Operator
         };
 
 
-        void initialize_fft(const MeshGrid& MG, const int& nbnd, const std::string& tagname_="")
-        {
-            tagname = tagname_;
-            //for now this is the only case implemented. it will be more general.
-            //we enter in this function only once
-            if(initialized_fft){
-                return;
-            }
-            initialized_fft = true;
-#ifdef EDUS_MPI
-            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex.get_nlocal(), nbnd, nbnd, 
-                                                            mpindex.get_RecommendedAllocate_fftw());
-#else
-            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex.get_nlocal(), nbnd, nbnd, 
-                                                            mpindex.get_RecommendedAllocate_fftw());
-#endif
-            switch(MG.get_space())
-            {
-                case R:
-                {
-                    auto& Rgrid = Operator_R.get_MeshGrid();
-                    Rgrid = std::make_shared<MeshGrid>(MG);
-                    FT_meshgrid_k = std::make_shared<MeshGrid>(fftPair(MG));
-                    FT_meshgrid_R = std::make_shared<MeshGrid>(fftPair(*FT_meshgrid_k));
-                    break;
-                }
-                case k:
-                {
-                    //FT_meshgrid_R = std::make_shared<MeshGrid<R>>(fftPair<R,k>(MG));
-                    //FT_meshgrid_k = std::make_shared<MeshGrid<k>>(fftPair<R,k>(*FT_meshgrid_R));
-                    throw std::runtime_error("Initialize fft from k Not yet implemented!\n");
-                }
-            }
-            Operator_k = BlockMatrix<std::complex<double>>(k,mpindex.get_nlocal(), nbnd, nbnd, 
-                                                           mpindex.get_RecommendedAllocate_fftw());
-            auto& kgrid = Operator_k.get_MeshGrid();
-            kgrid = FT_meshgrid_k;
-            //bandindex.initialize(nbnd);
-            bandindex.initialize({nbnd, nbnd});
-
-            //bandindex FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex.get_RecommendedAllocate_fftw()});
-            //bandindex FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex.get_RecommendedAllocate_fftw()});
-            auto dim_k = mpindex.get_nlocal() > 0 ? mpindex.get_nlocal() : 1;//to avoid that we get a 0 allocated pointer
-//==#ifdef EDUS_MPI
-            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {dim_k,nbnd*nbnd} );
-            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {dim_k,nbnd*nbnd} );
-//==#else
-//==            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_nlocal()});
-//==            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex.get_nlocal()});
-//==#endif
-            //use convolution index for shuffle index.
-            std::vector<int> Dimensions(3);
-            for(int ix=0; ix<3; ix++){
-                Dimensions[ix] = FT_meshgrid_k->get_Size()[ix];
-            }
-            ft_.initialize(FTfriendly_Operator_k, FTfriendly_Operator_R, Dimensions, tagname);
-            //shuffle_to_fft();
-            this->space = R;
-            locked_space = true;
-        };
-
-
         void initialize_fft(const std::shared_ptr<MeshGrid>& MGR, 
                             const std::shared_ptr<MeshGrid>& Mgk, 
                             const int& nbnd, 
                             const MPIindex<3>& mpindex__,
-                            const std::string& tagname_="")
+                            const std::string& tagname_="",
+                            const std::shared_ptr<MeshGrid>& Mgq__ = nullptr
+                        )
         {
-            tagname = tagname_;
-            //for now this is the only case implemented. it will be more general.
-            //we enter in this function only once
             if(initialized_fft){
                 return;
             }
             initialized_fft = true;
-#ifdef EDUS_MPI
-            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex__.get_nlocal(), nbnd, nbnd, 
-                                                            mpindex__.get_RecommendedAllocate_fftw());
-#else
-            Operator_R = BlockMatrix<std::complex<double>>(R,mpindex__.get_nlocal(), nbnd, nbnd, 
-                                                            mpindex__.get_RecommendedAllocate_fftw());
-#endif
+
+            tagname = tagname_;
+            mpindex_ptr_ = &mpindex__;
+            int nq = Mgq__ ? Mgq__->get_TotalSize() : 1;
+            if( mpindex__.get_howmany() != nq*nbnd*nbnd ) {
+                throw std::runtime_error
+                    ("initialize_fft: mpindex howmany != nq*nbnd*nbnd");
+            }
+            Operator_R = BlockMatrix<std::complex<double>>(R, mpindex__.get_nlocal(), nbnd, nbnd,
+                                               mpindex__.get_RecommendedAllocate_fftw(), nq);
+            Operator_k = BlockMatrix<std::complex<double>>(k, mpindex__.get_nlocal(), nbnd, nbnd,
+                                               mpindex__.get_RecommendedAllocate_fftw(), nq);
 
             FT_meshgrid_R = MGR;
             FT_meshgrid_k = Mgk;
+            FT_meshgrid_q = Mgq__;
+            
             auto& Rgrid = Operator_R.get_MeshGrid();
             Rgrid = MGR;
 
-            Operator_k = BlockMatrix<std::complex<double>>(k,mpindex__.get_nlocal(), nbnd, nbnd,
-                                                           mpindex__.get_RecommendedAllocate_fftw());
             auto& kgrid = Operator_k.get_MeshGrid();
             kgrid = FT_meshgrid_k;
             //bandindex.initialize(nbnd);
@@ -300,8 +246,8 @@ class Operator
             //bandindex FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*(nbnd+1)/2, mpindex__.get_RecommendedAllocate_fftw()});
             auto dim_k = mpindex__.get_nlocal() > 0 ? mpindex__.get_nlocal() : 1;//to avoid that we get a 0 allocated pointer
 //==#ifdef EDUS_MPI
-            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {dim_k,nbnd*nbnd} );
-            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {dim_k,nbnd*nbnd} );
+            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>( Operator_k.data(), {dim_k, nq*nbnd*nbnd} );
+            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>( Operator_R.data(), {dim_k, nq*nbnd*nbnd} );
 //==#else
 //==            FTfriendly_Operator_k = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex__.get_nlocal()});
 //==            FTfriendly_Operator_R = mdarray<std::complex<double>, 2>({nbnd*nbnd, mpindex__.get_nlocal()});
@@ -319,14 +265,18 @@ class Operator
 
 
         void initialize_fft(const Operator& Op__, const std::string& tagname__="")
-        {            
+        {
             auto nbnd = Op__.get_Operator_R().get_nrows();
-            auto& MG = Op__.get_Operator_R().get_MeshGrid();
-            initialize_fft(*MG, nbnd, tagname__);
-        };
-
+            initialize_fft(Op__.FT_meshgrid_R,     // same R grid
+            Op__.FT_meshgrid_k,     // same k grid
+            nbnd,
+            Op__.get_mpindex(),     // same mpindex (howmany = nq*nb*nb)
+            tagname__,
+            Op__.FT_meshgrid_q);    // same q grid (nullptr if diagonal in k)
+}
         void dft(const std::vector<Coordinate>& path, const int& sign, const bool& UseMPI=true)
         {
+            throw_if_nq_gt1("dft");
             initialize_dft();
 #ifdef EDUS_MPI
             std::vector<Coordinate> path_local;
@@ -354,6 +304,7 @@ class Operator
 
         void print_Rdecay(const std::string& str__, const std::vector<Coordinate>& rwann__)
         {
+            throw_if_nq_gt1("print_Rdecay");
             std::stringstream rank;
 #ifdef EDUS_MPI
             rank << str__ << mpi::Communicator::world().rank() << ".txt";
@@ -389,6 +340,16 @@ class Operator
             return *FT_meshgrid_k;
         }
 
+        const MPIindex<3>& get_mpindex() const { return *mpindex_ptr_; }
+        int get_nq() const { return Operator_k.get_nq(); }
+        bool is_k_diagonal() const { return FT_meshgrid_q == nullptr; }
+        /// Throws for functions that are not yet generalized to q != 0 (nq > 1)
+        void throw_if_nq_gt1(const std::string& function_name__) const
+        {
+            if( get_nq() > 1 ) {
+                throw std::runtime_error("Operator::" + function_name__ + ": not implemented for nq > 1\n");
+            }
+        }
 /*
  * "initialize_dft()"
  * The following function is used to reshuffle the operator in such a way that R is the first index
@@ -397,6 +358,7 @@ class Operator
 */
         void initialize_dft()
         {
+            throw_if_nq_gt1("initialize_dft");
             PROFILE("initialize_dft");
             //we enter in this function only once
             if(initialized_dft){
@@ -594,6 +556,7 @@ class Operator
 
         void go_to_wannier()
         {
+            throw_if_nq_gt1("go_to_wannier");
 #ifdef EDUS_TIMERS
             PROFILE("Operator::go_to_wannier");
 #endif
@@ -613,6 +576,7 @@ class Operator
 
         void go_to_bloch()
         {
+            throw_if_nq_gt1("go_to_bloch");
             // O_{bloch} = U^\dagger O_{wannier} U
 #ifdef EDUS_TIMERS
             PROFILE("Operator::go_to_bloch");
@@ -688,23 +652,9 @@ class Operator
         BandGauge get_bandgauge() const { return bandgauge; }
 
 
-        void initialize_dims(const Operator<T>& Allocated_Op)
-        {
-            this->Operator_k.initialize(k, Allocated_Op.get_Operator_k().get_nblocks(), 
-                Allocated_Op.get_Operator_k().get_nrows(),  Allocated_Op.get_Operator_k().get_ncols() );
-            this->Operator_R.initialize(k, Allocated_Op.get_Operator_R().get_nblocks(), 
-                Allocated_Op.get_Operator_R().get_nrows(),  Allocated_Op.get_Operator_R().get_ncols() );
-            FTfriendly_Operator_R.initialize(Allocated_Op.FTfriendly_Operator_R.get_Size());
-            FTfriendly_Operator_k.initialize(Allocated_Op.FTfriendly_Operator_k.get_Size());
-            FT_meshgrid_k = Allocated_Op.FT_meshgrid_k;
-            FT_meshgrid_R = Allocated_Op.FT_meshgrid_R;
-            this->Operator_k.set_MeshGrid(*FT_meshgrid_k);
-            this->Operator_R.set_MeshGrid(*FT_meshgrid_R);
-            SpaceOfPropagation = Allocated_Op.SpaceOfPropagation;            
-        }
-
         bool is_hermitian()
         {
+            throw_if_nq_gt1("is_hermitian");
             bool is_hermitian = true; 
             //#pragma omp parallel for
             for( int ik=0; ik<Operator_k.get_nblocks(); ik++ ) {
