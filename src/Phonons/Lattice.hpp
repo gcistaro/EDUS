@@ -100,6 +100,9 @@ class Lattice
         /// Force constants from q2r: its q grid, and whether the material is polar (long-range part not included)
         std::array<int, 3> ifc_grid_ = {0, 0, 0};
         bool polar_ifc_ = false;
+        /// max|e^{iq.R} g(R;-q) - g(-R;q)^dagger| / max|g| on the list of EPW (0 with one q point): hermiticity of the
+        /// coupling at q, g(k+q,-q) = g(k,q)^dagger
+        double hermiticity_q_ = 0.;
         /// Frequencies of the bare lattice K - Pi (static reference only, for the recap)
         std::vector<double> frequencies_bare_;
         /// Normal modes of the force constants of ph.x: omega^2 (a.u.) and real orthonormal eigenvectors
@@ -141,7 +144,8 @@ class Lattice
         std::vector<double> frequencies_mismatch_;
         double mismatch_antisymmetry_ = 0.;
         std::vector<Operator<std::complex<double>>> response_;
-        /// Bare electron-phonon coupling g_b at q = 0 on the grid of the simulation, one Operator per mode (Ha/bohr)
+        /// Bare electron-phonon coupling g_b on the grid of the simulation, one Operator per mode (Ha/bohr), with the q
+        /// components g(k,q) (rows at k+q, columns at k) if the q grid has more than one point
         std::vector<Operator<std::complex<double>>> coupling_;
         /// Screened coupling g_s, same layout; empty if not given
         std::vector<Operator<std::complex<double>>> coupling_screened_;

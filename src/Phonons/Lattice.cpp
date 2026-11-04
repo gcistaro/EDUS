@@ -39,6 +39,14 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
         throw std::runtime_error("phonons/ifc_file: with more than one q point the force constants K(q) are needed "
                                  "(interatomic force constants of q2r.x)\n");
     }
+    if( num_qpoints_ > 1 && parameters_.adiabatic_reference == AdiabaticReference::static_response ) {
+        throw std::runtime_error("phonons: with more than one q point only adiabatic_reference = dynamic is implemented "
+                                 "for now (the static response at q is still to be written)\n");
+    }
+    if( num_qpoints_ > 1 && parameters_.screened() ) {
+        throw std::runtime_error("phonons: with more than one q point the screened coupling (epw_directory_screened) is "
+                                 "not implemented yet\n");
+    }
     {
         auto& q0 = parameters_.initial_displacement_q;
         Coordinate qplus(q0[0], q0[1], q0[2], LatticeVectors(k));
@@ -293,35 +301,108 @@ void Lattice::read_coupling(const std::string& directory__, const std::string& e
 #endif
     }
 
-    /* g_mu(R_e; q) for q = Gamma: (mode, R_e, band, band), Ha/bohr */
-    auto g = read_epmatwp(directory__ + "/" + epmatwp__, epw, std::array<double, 3>{0., 0., 0.});
+    /* g_mu(R_e; q) for each q of the q grid: (mode, R_e, band, band), Ha/bohr. With rows at k+q and columns at k,
+       g_mu(k,q) = sum_{R_e} e^{ik.R_e} g_mu(R_e; q) goes into the q slice of coupling__[mu], like H(k,q) = h(k+q,k) */
+    const int nq = gridstructure__.qgrid()->get_TotalSize();
     coupling__.resize(num_modes_);
-    mdarray<std::complex<double>, 3> values({epw.nrr_k, num_bands_, num_bands_});
     for( int mu = 0; mu < num_modes_; ++mu ) {
-        /* coupling_scale allows to switch the coupling off (0) keeping everything else, e.g. for tests */
-        for( int ir = 0; ir < epw.nrr_k; ++ir ) {
-            for( int i = 0; i < num_bands_; ++i ) {
-                for( int j = 0; j < num_bands_; ++j ) {
-                    values(ir, i, j) = parameters_.coupling_scale * g(mu, ir, i, j);
+        std::stringstream tag;
+        tag << "g_" << mu;
+        if( nq > 1 ) {
+            coupling__[mu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
+                                          decomposition__.mpindex_q(), tag.str(), gridstructure__.qgrid());
+        }
+        else {
+            coupling__[mu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
+                                          decomposition__.mpindex(), tag.str());
+        }
+    }
+    /* g(R_e; q) of every q, kept for the check of hermiticity below (few numbers: modes x R_e x bands^2 per q) */
+    std::vector<mdarray<std::complex<double>, 4>> g_all(nq);
+    mdarray<std::complex<double>, 3> values({epw.nrr_k, num_bands_, num_bands_});
+    for( int iq = 0; iq < nq; ++iq ) {
+        std::array<double, 3> q = {0., 0., 0.};
+        if( iq > 0 ) {
+            auto& qc = (*gridstructure__.qgrid())[iq].get(LatticeVectors(k));
+            q = {qc[0], qc[1], qc[2]};
+        }
+        g_all[iq] = read_epmatwp(directory__ + "/" + epmatwp__, epw, q);
+        auto& g = g_all[iq];
+        for( int mu = 0; mu < num_modes_; ++mu ) {
+            /* coupling_scale allows to switch the coupling off (0) keeping everything else, e.g. for tests */
+            for( int ir = 0; ir < epw.nrr_k; ++ir ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        values(ir, i, j) = parameters_.coupling_scale * g(mu, ir, i, j);
+                    }
+                }
+            }
+            /* EPW list of R -> k points of the simulation */
+            auto gk = to_k(values);
+            auto& src = gk.get_Operator(Space::k);
+            /* at q = 0 the coupling is hermitian: remove the error of the Wannier interpolation. At q != 0 g(k,q) is
+               not hermitian: the relation is g(k+q,-q) = g(k,q)^dagger, checked below */
+            if( iq == 0 ) {
+                src.make_hermitian();
+            }
+            auto& dst = coupling__[mu].get_Operator(Space::k);
+            for( int ik = 0; ik < src.get_nblocks(); ++ik ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        dst(ik, iq, i, j) = src(ik, i, j);
+                    }
                 }
             }
         }
-        /* EPW list of R -> k points of the simulation */
-        auto gk = to_k(values);
-        /* at q = 0 the coupling is hermitian: remove the error of the Wannier interpolation */
-        gk.get_Operator(Space::k).make_hermitian();
-
-        /* k points of the simulation -> FFT grid in R, where it is added to H during the propagation.
-           Both components (k and R) of coupling_[mu] stay available afterwards */
-        std::stringstream tag;
-        tag << "g_" << mu;
-        coupling__[mu].initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands_,
-                                      decomposition__.mpindex(), tag.str());
-        auto& src = gk.get_Operator(Space::k);
-        std::copy(src.begin(), src.end(), coupling__[mu].get_Operator(Space::k).begin());
+    }
+    /* k points of the simulation -> FFT grid in R, where it is added to H during the propagation.
+       Both components (k and R) of coupling__[mu] stay available afterwards */
+    for( int mu = 0; mu < num_modes_; ++mu ) {
         coupling__[mu].lock_gauge(wannier);
         coupling__[mu].lock_space(Space::k);
         coupling__[mu].go_to_R();
+    }
+
+    /* check of g(k+q,-q) = g(k,q)^dagger on the list of EPW: e^{iq.R_e} g_mn(R_e;-q) = conj(g_nm(-R_e;q)).
+       It tests the Wannier interpolation of EPW and the convention of the phases in q (all the ranks have g_all) */
+    hermiticity_q_ = 0.;
+    if( nq > 1 ) {
+        std::vector<int> minus_R(epw.nrr_k, -1);
+        for( int ir = 0; ir < epw.nrr_k; ++ir ) {
+            for( int ir2 = 0; ir2 < epw.nrr_k; ++ir2 ) {
+                if( epw.irvec_k[ir2][0] == -epw.irvec_k[ir][0] && epw.irvec_k[ir2][1] == -epw.irvec_k[ir][1]
+                    && epw.irvec_k[ir2][2] == -epw.irvec_k[ir][2] ) {
+                    minus_R[ir] = ir2;
+                }
+            }
+        }
+        double scale = 0., largest = 0.;
+        for( int iq = 1; iq < nq; ++iq ) {
+            auto& qc = (*gridstructure__.qgrid())[iq].get(LatticeVectors(k));
+            Coordinate mq(-qc[0], -qc[1], -qc[2], LatticeVectors(k));
+            const int iqm = gridstructure__.qgrid()->find(mq);
+            if( iqm < 0 ) {
+                continue;
+            }
+            for( int mu = 0; mu < num_modes_; ++mu ) {
+                for( int ir = 0; ir < epw.nrr_k; ++ir ) {
+                    if( minus_R[ir] < 0 ) {
+                        continue;
+                    }
+                    const double qR = 2. * M_PI * (qc[0] * epw.irvec_k[ir][0] + qc[1] * epw.irvec_k[ir][1]
+                                                   + qc[2] * epw.irvec_k[ir][2]);
+                    const std::complex<double> phase(std::cos(qR), std::sin(qR));
+                    for( int m = 0; m < num_bands_; ++m ) {
+                        for( int n = 0; n < num_bands_; ++n ) {
+                            scale = std::max(scale, std::abs(g_all[iq](mu, ir, m, n)));
+                            largest = std::max(largest, std::abs(phase * g_all[iqm](mu, ir, m, n)
+                                                                 - std::conj(g_all[iq](mu, minus_R[ir], n, m))));
+                        }
+                    }
+                }
+            }
+        }
+        hermiticity_q_ = std::max(hermiticity_q_, scale > 0. ? largest / scale : 0.);
     }
 }
 
@@ -344,17 +425,23 @@ double Lattice::remove_translation_from_coupling(std::vector<Operator<std::compl
     for( int atom = 0; atom < num_atoms_; ++atom ) {
         total_mass += mass_[3 * atom];
     }
+    /* only the q = 0 slice (the first point of the q grid): a rigid translation is a q = 0 displacement */
     auto& g0 = coupling__[0].get_Operator(Space::k);
-    BlockMatrix<std::complex<double>> sum(k, g0.get_nblocks(), num_bands_, num_bands_);
+    const int nk = g0.get_nk();
+    BlockMatrix<std::complex<double>> sum(k, nk, num_bands_, num_bands_);
     double translation = 0.;
     for( int ix : {0, 1, 2} ) {
         sum.fill(0.);
         double scale = 0.;
         for( int atom = 0; atom < num_atoms_; ++atom ) {
             auto& g = coupling__[3 * atom + ix].get_Operator(Space::k);
-            for( int i = 0; i < g.get_TotalSize(); ++i ) {
-                *(sum.begin() + i) += *(g.begin() + i);
-                scale = std::max(scale, std::abs(*(g.begin() + i)));
+            for( int ik = 0; ik < nk; ++ik ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        sum(ik, i, j) += g(ik, 0, i, j);
+                        scale = std::max(scale, std::abs(g(ik, 0, i, j)));
+                    }
+                }
             }
         }
         double largest = 0.;
@@ -372,8 +459,12 @@ double Lattice::remove_translation_from_coupling(std::vector<Operator<std::compl
             int mu = 3 * atom + ix;
             auto& g = coupling__[mu].get_Operator(Space::k);
             double weight = mass_[mu] / total_mass;
-            for( int i = 0; i < g.get_TotalSize(); ++i ) {
-                *(g.begin() + i) -= weight * *(sum.begin() + i);
+            for( int ik = 0; ik < nk; ++ik ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        g(ik, 0, i, j) -= weight * sum(ik, i, j);
+                    }
+                }
             }
         }
     }
@@ -1236,6 +1327,9 @@ void Lattice::print_recap() const
     if( !parameters_.ifc_file.empty() ) {
         output::print("Force constants (q2r)    *", std::string(8, ' '), parameters_.ifc_file);
         output::print("q grid of q2r            *", ifc_grid_[0], ifc_grid_[1], ifc_grid_[2]);
+        if( num_qpoints() > 1 ) {
+            output::print("g(k+q,-q) - g(k,q)^+     *", hermiticity_q_, " (max, relative to max|g|)");
+        }
         if( polar_ifc_ ) {
             output::print("WARNING: polar material (Z* and epsilon in the file of q2r): only the short-range force constants are "
                           "used, without the non-analytic (LO-TO) part");
