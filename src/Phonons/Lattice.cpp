@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -65,21 +66,43 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
         }
     }
 
-    /* 2. masses and force constants at Gamma */
-    auto dyn = read_dynamical_matrix(parameters_.dyn_file);
-    if( dyn.num_atoms != num_atoms_ ) {
-        std::stringstream ss;
-        ss << "The dynamical matrix " << parameters_.dyn_file << " has " << dyn.num_atoms << " atoms, EPW "
-           << num_atoms_ << "\n";
-        throw std::runtime_error(ss.str());
+    /* 2. masses and force constants at Gamma: from the dynamical matrix of ph.x at Gamma, or from the force constants of
+       q2r (ifc_file), which give K(q) at every q of the grid (step 2b below) */
+    ForceConstants ifc;
+    DynamicalMatrix dyn;
+    const bool from_ifc = !parameters_.ifc_file.empty();
+    if( from_ifc ) {
+        ifc = read_force_constants(parameters_.ifc_file);
+        if( ifc.num_atoms != num_atoms_ ) {
+            std::stringstream ss;
+            ss << "The force constants " << parameters_.ifc_file << " have " << ifc.num_atoms << " atoms, EPW "
+               << num_atoms_ << "\n";
+            throw std::runtime_error(ss.str());
+        }
+        polar_ifc_ = ifc.polar;
+        ifc_grid_ = ifc.nr;
+        /* the sum rule in real space: K(q = 0) satisfies it, and K(q != 0) gets the same correction (as matdyn) */
+        if( parameters_.acoustic_sum_rule ) {
+            asr_correction_ = impose_acoustic_sum_rule(ifc);
+        }
+        dyn = dynamical_matrix(ifc, {0., 0., 0.});
     }
-    if( std::abs(dyn.q[0]) + std::abs(dyn.q[1]) + std::abs(dyn.q[2]) > 1.e-8 ) {
-        throw std::runtime_error("The first dynamical matrix of " + parameters_.dyn_file + " is not at q = Gamma\n");
-    }
-    /* a rigid translation of the crystal costs no energy: sum_atom' K(atom alpha, atom' beta) = 0. ph.x satisfies it only
-       approximately, and the small error would give a spurious frequency to the acoustic modes */
-    if( parameters_.acoustic_sum_rule ) {
-        asr_correction_ = impose_acoustic_sum_rule(dyn);
+    else {
+        dyn = read_dynamical_matrix(parameters_.dyn_file);
+        if( dyn.num_atoms != num_atoms_ ) {
+            std::stringstream ss;
+            ss << "The dynamical matrix " << parameters_.dyn_file << " has " << dyn.num_atoms << " atoms, EPW "
+               << num_atoms_ << "\n";
+            throw std::runtime_error(ss.str());
+        }
+        if( std::abs(dyn.q[0]) + std::abs(dyn.q[1]) + std::abs(dyn.q[2]) > 1.e-8 ) {
+            throw std::runtime_error("The first dynamical matrix of " + parameters_.dyn_file + " is not at q = Gamma\n");
+        }
+        /* a rigid translation of the crystal costs no energy: sum_atom' K(atom alpha, atom' beta) = 0. ph.x satisfies it
+           only approximately, and the small error would give a spurious frequency to the acoustic modes */
+        if( parameters_.acoustic_sum_rule ) {
+            asr_correction_ = impose_acoustic_sum_rule(dyn);
+        }
     }
     /* each cartesian coordinate mu = 3*atom + direction moves the mass of its atom */
     mass_.resize(num_modes_);
@@ -157,12 +180,29 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
         }
     }
 
-    /* one matrix per q point; for now only Gamma (index 0) */
+    /* 2b. one matrix per q point of the grid: K at Gamma (q = 0 is the first point of the q grid), and from the force
+       constants of q2r at the other q, made hermitian. Frequencies and modes at each q for the recap and the output */
     force_constants_.initialize({num_qpoints(), num_modes_, num_modes_});
+    force_constants_.fill(0.);
     for( int mu = 0; mu < num_modes_; ++mu ) {
         for( int nu = 0; nu < num_modes_; ++nu ) {
             force_constants_(0, mu, nu) = K(mu, nu);
         }
+    }
+    frequencies_q_.assign(num_qpoints(), frequencies_input_);
+    qpoints_.assign(num_qpoints(), {0., 0., 0.});
+    for( int iq = 1; iq < num_qpoints(); ++iq ) {
+        auto& qc = (*gridstructure__.qgrid())[iq].get(LatticeVectors(k));
+        qpoints_[iq] = {qc[0], qc[1], qc[2]};
+        auto dq = dynamical_matrix(ifc, {qc[0], qc[1], qc[2]});
+        mdarray<std::complex<double>, 2> Kq({num_modes_, num_modes_});
+        for( int mu = 0; mu < num_modes_; ++mu ) {
+            for( int nu = 0; nu < num_modes_; ++nu ) {
+                Kq(mu, nu) = 0.5 * (dq.C(mu, nu) + std::conj(dq.C(nu, mu)));
+                force_constants_(iq, mu, nu) = Kq(mu, nu);
+            }
+        }
+        frequencies_q_[iq] = frequencies_hermitian(Kq);
     }
 
     if( !parameters_.initial_displacement.empty() && int(parameters_.initial_displacement.size()) != num_modes_ ) {
@@ -915,6 +955,32 @@ std::vector<double> Lattice::frequencies(const mdarray<std::complex<double>, 2>&
     return omega;
 }
 
+/// @brief Frequencies for force constants that are complex hermitian (q != 0). D = M^{-1/2} K M^{-1/2} = A + iB is
+/// diagonalized through the real symmetric matrix [[A, -B], [B, A]], which has the same eigenvalues, each twice
+std::vector<double> Lattice::frequencies_hermitian(const mdarray<std::complex<double>, 2>& K__) const
+{
+    const int n = num_modes_;
+    std::vector<double> D(4 * n * n);
+    for( int mu = 0; mu < n; ++mu ) {
+        for( int nu = 0; nu < n; ++nu ) {
+            auto d = K__(mu, nu) / std::sqrt(mass_[mu] * mass_[nu]);
+            D[mu * 2 * n + nu] = d.real();
+            D[(mu + n) * 2 * n + nu + n] = d.real();
+            D[mu * 2 * n + nu + n] = -d.imag();
+            D[(mu + n) * 2 * n + nu] = d.imag();
+        }
+    }
+    std::vector<double> omega2, V;
+    symmetric_eigen(D, 2 * n, omega2, V);
+    std::sort(omega2.begin(), omega2.end());
+    std::vector<double> omega(n);
+    for( int i = 0; i < n; ++i ) {
+        const double w2 = omega2[2 * i];
+        omega[i] = (w2 >= 0. ? 1. : -1.) * std::sqrt(std::abs(w2));
+    }
+    return omega;
+}
+
 /// @brief The lattice in the normal modes lambda of ph.x (the physical, Born-Oppenheimer phonons at Gamma):
 ///     Q_lambda = sum_mu e(mu, lambda) sqrt(M_mu) u_mu,     F_lambda = sum_mu e(mu, lambda) F_mu / sqrt(M_mu),
 /// so that without the electrons Q'' = -omega^2 Q, and E_lambda = 1/2 dQ^2 + 1/2 omega^2 Q^2.
@@ -1162,11 +1228,18 @@ void Lattice::print_recap() const
         output::print("EPW directory (screened) *", std::string(8, ' '), parameters_.epw_directory_screened);
         output::print("epmatwp (screened)       *", std::string(8, ' '), parameters_.epmatwp_screened);
     }
-    output::print("Dynamical matrix         *", std::string(8, ' '), parameters_.dyn_file);
+    if( !parameters_.dyn_file.empty() ) {
+        output::print("Dynamical matrix         *", std::string(8, ' '), parameters_.dyn_file);
+    }
     output::print("Atoms, modes             *", num_atoms_, num_modes_);
     output::print("q points                 *", num_qpoints(), num_qpoints() == 1 ? " (Gamma)" : " (the q grid)");
     if( !parameters_.ifc_file.empty() ) {
         output::print("Force constants (q2r)    *", std::string(8, ' '), parameters_.ifc_file);
+        output::print("q grid of q2r            *", ifc_grid_[0], ifc_grid_[1], ifc_grid_[2]);
+        if( polar_ifc_ ) {
+            output::print("WARNING: polar material (Z* and epsilon in the file of q2r): only the short-range force constants are "
+                          "used, without the non-analytic (LO-TO) part");
+        }
     }
     output::print("Spin degeneracy          *", parameters_.spin_degeneracy);
     output::print("Electrons feel           *", std::string(8, ' '),
@@ -1234,6 +1307,17 @@ void Lattice::print_recap() const
         output::print("Frequencies at Gamma (cm^-1) of the dynamical matrix of ph.x (used in the dynamics):");
         for( int i = 0; i < num_modes_; ++i ) {
             output::print("   ", i, frequencies_input_[i] * ha_to_cm);
+        }
+    }
+    if( num_qpoints() > 1 ) {
+        output::print("Frequencies (cm^-1) of the force constants K(q) at the other points of the q grid (crystal coordinates):");
+        for( int iq = 1; iq < num_qpoints(); ++iq ) {
+            std::stringstream ss;
+            ss << "    q = (" << qpoints_[iq][0] << ", " << qpoints_[iq][1] << ", " << qpoints_[iq][2] << "):";
+            for( auto w : frequencies_q_[iq] ) {
+                ss << " " << std::fixed << std::setprecision(2) << w * ha_to_cm;
+            }
+            output::print(ss.str());
         }
     }
     output::stars();

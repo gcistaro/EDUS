@@ -93,6 +93,13 @@ class Lattice
         mdarray<std::complex<double>, 3> force_constants_;
         /// Frequencies of the modes from the force constants of ph.x (a.u.; negative if unstable)
         std::vector<double> frequencies_input_;
+        /// Frequencies of the force constants used in the dynamics at each point of the q grid (a.u.; [0] = Gamma)
+        std::vector<std::vector<double>> frequencies_q_;
+        /// Points of the q grid in crystal coordinates (for the recap and the output)
+        std::vector<std::array<double, 3>> qpoints_;
+        /// Force constants from q2r: its q grid, and whether the material is polar (long-range part not included)
+        std::array<int, 3> ifc_grid_ = {0, 0, 0};
+        bool polar_ifc_ = false;
         /// Frequencies of the bare lattice K - Pi (static reference only, for the recap)
         std::vector<double> frequencies_bare_;
         /// Normal modes of the force constants of ph.x: omega^2 (a.u.) and real orthonormal eigenvectors
@@ -173,6 +180,8 @@ class Lattice
         /// Normal modes of the force constants K__: omega^2 in ascending order and eigenvectors e(mu, lambda)
         void normal_modes(const mdarray<std::complex<double>, 2>& K__, std::vector<double>& omega2__,
                           mdarray<double, 2>& vectors__) const;
+        /// Frequencies (a.u., ascending) for complex hermitian force constants K__ (q != 0)
+        std::vector<double> frequencies_hermitian(const mdarray<std::complex<double>, 2>& K__) const;
         /// Frequencies of the modes (a.u.) for the force constants K__
         std::vector<double> frequencies(const mdarray<std::complex<double>, 2>& K__) const;
 

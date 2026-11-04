@@ -150,9 +150,9 @@ public:
         if( !p.epw_directory_screened.empty() && p.epmatwp_screened.empty() ) {
             p.epmatwp_screened = find_epmatwp(p.epw_directory_screened, "epmatwp_screened");
         }
-        if( p.dyn_file.empty() ) {
-            throw std::runtime_error("phonons/dyn_file: the dynamical matrix at Gamma of ph.x is needed for the masses and "
-                                     "the force constants\n");
+        if( p.dyn_file.empty() == p.ifc_file.empty() ) {
+            throw std::runtime_error("phonons: give either dyn_file (dynamical matrix of ph.x at Gamma, only with one q "
+                                     "point) or ifc_file (force constants of q2r.x), for the masses and the force constants\n");
         }
         if( p.spin_degeneracy <= 0. ) {
             throw std::runtime_error("phonons/spin_degeneracy must be positive\n");

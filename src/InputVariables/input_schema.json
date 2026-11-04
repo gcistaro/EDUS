@@ -337,12 +337,12 @@
                 "dyn_file": {
                     "type": "string",
                     "default": "",
-                    "title": "Dynamical matrix of ph.x at Gamma (text format, e.g. prefix.dyn1): masses and force constants"
+                    "title": "Dynamical matrix of ph.x at Gamma (text format, e.g. prefix.dyn1): masses and force constants. Only with one q point; alternative to ifc_file"
                 },
                 "ifc_file": {
                     "type": "string",
                     "default": "",
-                    "title": "Interatomic force constants of q2r.x (text format, e.g. prefix.fc): force constants K(q) on the q grid of the simulation. Needed if the q grid (qgrid) has more than one point; the lattice has one wavevector per point of the q grid"
+                    "title": "Interatomic force constants of q2r.x (text format, e.g. prefix.fc), alternative to dyn_file: masses and force constants K(q) on the q grid of the simulation (each q must be on the q grid of q2r). Needed if the q grid (qgrid) has more than one point; the lattice has one wavevector per point of the q grid"
                 },
                 "initial_displacement_q": {
                     "type": "array",
