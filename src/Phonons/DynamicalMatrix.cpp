@@ -184,8 +184,13 @@ ForceConstants read_force_constants(const std::string& filename__)
         /* Ry mass unit = 2 electron masses */
         fc.mass[ia] = 2. * type_mass[type - 1];
     }
+    /* "lrigid" or, in recent versions of QE, "lrigid alpha" (the Ewald parameter of the long-range part) */
     std::string lrigid;
-    file >> lrigid;
+    std::getline(file, line);
+    {
+        std::stringstream ss(line);
+        ss >> lrigid;
+    }
     fc.polar = ( lrigid.find('T') != std::string::npos || lrigid.find('t') != std::string::npos );
     if( fc.polar ) {
         /* epsilon (9 numbers), then per atom its index and Z* (9 numbers): not used for now */

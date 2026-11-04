@@ -19,7 +19,7 @@ static std::string write_chain(const int nr__, const double k_ry__, const bool b
     f << "  1.0 0.0 0.0\n  0.0 1.0 0.0\n  0.0 0.0 1.0\n";
     f << "  1  'A'  1000.0\n  2  'B'  2000.0\n";
     f << "  1  1  0.0 0.0 0.0\n  2  2  0.5 0.0 0.0\n";
-    f << " F\n";
+    f << " F   0.0000000000000000\n";   // recent QE writes lrigid and the Ewald parameter
     f << "  " << nr__ << "   1   1\n";
     for (int j1 = 1; j1 <= 3; ++j1) {
         for (int j2 = 1; j2 <= 3; ++j2) {
