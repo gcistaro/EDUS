@@ -1,0 +1,34 @@
+{
+    "tb_file": "../../tb_models/hBN_gap7.25eV_a2.5A",
+    "grid": [8,8,1],
+    "qgrid": [8,1,1],
+    "filledbands" : 1,
+
+    "coulomb": true,
+    "epsilon": 1.0,
+    "r0": [10],
+
+    "dt": 0.005,
+    "dt_units" : "femtoseconds",
+    "printresolution": 2,
+    "printresolution_pulse": 2,
+
+    "initialtime" : 0,
+    "initialtime_units" : "femtoseconds",
+    "finaltime": 4,
+    "finaltime_units" : "femtoseconds",
+
+    "solver": "RK",
+    "order": 4,
+
+    "lasers": [],
+    "local_potential": {
+        "enabled": true,
+        "q": [0.125, 0, 0],
+        "amplitude": 0.1,
+        "amplitude_units": "electronvolt",
+        "t0": 1.5,
+        "sigma": 0.4,
+        "time_units": "femtoseconds"
+    }
+}

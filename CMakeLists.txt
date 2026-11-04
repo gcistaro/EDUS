@@ -361,6 +361,15 @@ add_test(NAME MoS2_HSEX  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh
 add_test(NAME hBN_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX 4)
 add_test(NAME LiF_HSEX_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh LiF_HSEX 4)
 set_tests_properties(hBN_HSEX_np4 LiF_HSEX_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+# density matrix with q components (qgrid): local potential V0 f(t) cos(q0.r) at q0 = b1/8, in IPA against the exact
+# linear response (ci-test/check_local_potential.py) and with Hartree and SEX (regression, also with 4 ranks), both
+# with the continuity dn(q)/dt = -i Omega q.j(q) (ci-test/check_continuity_q.py); hBN_HSEX with qgrid [2,1,1]: the
+# laser does not create q != 0, the q = 0 slice must give the outputs of hBN_HSEX (same reference files)
+add_test(NAME hBN_IPA_q       COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_IPA_q       2)
+add_test(NAME hBN_HSEX_q      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_q      2)
+add_test(NAME hBN_HSEX_q_np4  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_q      4)
+add_test(NAME hBN_HSEX_qgrid  COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_qgrid  2)
+set_tests_properties(hBN_HSEX_q_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
 # Ehrenfest dynamics of the lattice with synthetic electron-phonon data in the format of EPW
 # (tb_models/hBN_synthetic_epw, from utility/make_synthetic_epw.py): static limit without laser with the
 # static adiabatic reference (IPA and HSEX: the static response of the electrons must give back the frequency of

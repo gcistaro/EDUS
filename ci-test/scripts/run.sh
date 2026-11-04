@@ -88,7 +88,10 @@ done
 # ─────────────────────────────────────────────
 # Energy balance: E(t) - E(0) = work of the field (no reference needed)
 # ─────────────────────────────────────────────
-if ! grep -q '"decay"' "${INPUT}"; then
+if [ ! -f Output/Energy.txt ]; then
+    # not written with nq > 1 (q grid)
+    :
+elif ! grep -q '"decay"' "${INPUT}"; then
     python3 "${PROJECT_ROOT}/ci-test/check_energy.py" Output/Energy.txt || num_failures=$((num_failures+1))
 else
     # with decay the energy is not conserved: analytic check of the relaxation after the pulses

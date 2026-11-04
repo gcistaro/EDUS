@@ -102,7 +102,10 @@ lp_time = TIME_UNITS[lp.get("time_units", "femtoseconds")]
 tau_decay = float(d.get("decay", 0.)) * TIME_UNITS[d.get("decay_units", "femtoseconds").lower()]
 size = np.array(d["grid"], dtype=int)
 nfilled = int(d["filledbands"])
-tb_file = os.path.join(os.path.dirname(os.path.abspath(args.input)), d["tb_file"] + "_tb.dat")
+# tb_file is relative to the directory where EDUS runs (the current one, as in run.sh), or to the input
+tb_file = d["tb_file"] + "_tb.dat"
+if not os.path.isabs(tb_file) and not os.path.exists(tb_file):
+    tb_file = os.path.join(os.path.dirname(os.path.abspath(args.input)), tb_file)
 
 A, Rs, HR, rR = read_tb(tb_file)
 B = 2. * np.pi * np.linalg.inv(A).T                       # rows = b_i

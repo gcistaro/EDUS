@@ -49,8 +49,13 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         iqmp_ = &gridstructure__.iqmp();
         auto& qgrid = *gridstructure__.qgrid();
         phase_tau_.initialize({nq_, nb});
+        /* q and q + G are the same point of the grid but not the same Fourier component of the density: j(q) is
+           the one at the smallest q, crystal coordinates folded in (-1/2, 1/2] */
         for( int iq = 0; iq < nq_; ++iq ) {
-            auto q = qgrid[iq].get("Cartesian");
+            auto qc = qgrid[iq].get(LatticeVectors(k));
+            Coordinate folded(qc[0] - std::ceil(qc[0] - 0.5), qc[1] - std::ceil(qc[1] - 0.5), qc[2] - std::ceil(qc[2] - 0.5),
+                              LatticeVectors(k));
+            auto q = folded.get("Cartesian");
             for( int n = 0; n < nb; ++n ) {
                 auto tau = system_->wannier_centers()[n].get("Cartesian");
                 phase_tau_(iq, n) = std::exp(-im*(q[0]*tau[0] + q[1]*tau[1] + q[2]*tau[2]));
@@ -108,7 +113,7 @@ void OutputManager::initialize(const OutputParameters& parameters__,
             os_current_q_.open(path("CurrentQ.txt"));
             os_current_q_ << "# j(q,t) = 1/(N Omega) <1/2 {v, e^{-iq.r}}>, v = i[H0 + Sigma + V, r], e^{-iq.r} = diag(e^{-iq.(R+tau_n)}) (corrente_q_finito.pdf)\n"
                           << "# q = 0 is Velocity.txt. Continuity: dn(q)/dt = -i Omega q.j(q) (1 + O(q^2)), n(q) = sum_m e^{-iq.tau_m} n_m(q) of DensityQ.txt, Omega = cell volume\n"
-                          << "# q points: the same of DensityQ.txt\n"
+                          << "# q points: the same of DensityQ.txt, folded in (-1/2, 1/2] (crystal coordinates) for e^{-iq.tau}\n"
                           << "# columns: time, then for iq = 0..nq-1 and direction x, y, z: Re j(q), Im j(q)\n";
         }
         if( propagator_->local_potential().enabled() ) {
