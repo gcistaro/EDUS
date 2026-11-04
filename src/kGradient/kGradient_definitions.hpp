@@ -4,6 +4,19 @@
    in k space, we use the formula from Mostofi2008; in R space, we calculate it as:
    Derivative(R) = i*R*Function(R)
 */
+/* number of q points of the function: BlockMatrix has get_nq(), other containers (mdarray) have nq = 1 */
+template<typename T>
+auto kgradient_get_nq(const T& function__, int) -> decltype(function__.get_nq())
+{
+    return function__.get_nq();
+}
+
+template<typename T>
+int kgradient_get_nq(const T&, long)
+{
+    return 1;
+}
+
 template<typename T, typename U, typename S>
 void kGradient::Calculate(const S& scalar, T& DerivativeFunction, const T& Function, 
                           const U& direction, const bool& EraseOutput) const
@@ -16,7 +29,12 @@ void kGradient::Calculate(const S& scalar, T& DerivativeFunction, const T& Funct
     }
 
     /* case 1-> we calculate the gradient directly in k */
+    const int nq = kgradient_get_nq(Function, 0);
+
     if( kmesh && !Rmesh ) {
+        if( nq > 1 ) {
+            throw std::runtime_error("kGradient::Calculate in k: not implemented for nq > 1, use gradient_space = R\n");
+        }
         #pragma omp parallel for schedule(static)
         for( int ik = 0; ik < mpindex.nlocal; ++ik ) {
             for( int ishell = 0; ishell < Weight.get_Size(0); ++ishell ) {
@@ -36,7 +54,12 @@ void kGradient::Calculate(const S& scalar, T& DerivativeFunction, const T& Funct
         #pragma omp parallel for schedule(static)
         for( int iR_loc = 0; iR_loc < mpindex.nlocal; ++iR_loc ) {
             auto iR_global = (const_cast<MPIindex<3>&>(mpindex)).loc1D_to_glob1D(iR_loc);
-            DerivativeFunction[iR_loc] += scalar*im*(*Rmesh)[iR_global].dot(direction)*Function[iR_loc];
+            auto factor = scalar*im*(*Rmesh)[iR_global].dot(direction);
+            /* at fixed q, R is conjugate to k: the same factor i*R.direction for every q */
+            for( int iq = 0; iq < nq; ++iq ) {
+                const int iblock = iR_loc*nq + iq;
+                DerivativeFunction[iblock] += factor*Function[iblock];
+            }
         }
     }
 }

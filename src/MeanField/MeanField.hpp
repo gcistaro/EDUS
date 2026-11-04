@@ -30,6 +30,13 @@ namespace electron {
             /// The effective Hartree potential, defined as: @f[ H_{nm} = \sum_\textbf{R} V_{nm}(\textbf{R}) = 
             /// \sum_\textbf{R} \langle n\textbf{0}m\textbf{R}|V(r-r')| n\textbf{0}m\textbf{R} \rangle @f]
             mdarray<std::complex<double>, 2> Hartree;
+            /// Hartree potential at the points q of the q grid (nq > 1): @f[ V_{nm}(\textbf{q}) = \sum_\textbf{R}
+            /// e^{i\textbf{q}\cdot\textbf{R}} V_{nm}(\textbf{R}) @f], so that @f$ v_n(q) = \sum_m V_{nm}(q)\Delta n_m(q) @f$
+            /// with @f$ n_m(q) = \rho_{mm}(\textbf{R}=0;q) @f$. hartree_q_(0) = Hartree
+            mdarray<std::complex<double>, 3> hartree_q_;
+            /// Self energy with the q components of the density matrix (H__ and DM__ with nq > 1)
+            void self_energy_q(BlockMatrix<std::complex<double>>& HR__, const BlockMatrix<std::complex<double>>& DMR__,
+                               const BlockMatrix<std::complex<double>>& DM0R__);
             /// Smallest eigenvalue of Hartree for the charge-neutral changes of the occupations (Ha), for the recap
             double hartree_min_eigenvalue_ = 0.;
             /// Number of groups of Wannier centers (atoms) with hartree_centers = atoms

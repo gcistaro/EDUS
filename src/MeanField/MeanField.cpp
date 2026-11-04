@@ -174,6 +174,54 @@ void MeanField::initialize( const MeanFieldParameters& parameters__,
         }
     }
 
+    /* Hartree potential at the q points: V(q) = sum_R e^{iq.R} V(R). The potential of the density n_m(R2) on the
+       orbital n in R1 is v_n(R1) = sum_{m,R2} V_nm(R2-R1) n_m(R2); with n_m(R1) = sum_q e^{iq.R1} n_m(q) it is
+       v_n(R1) = sum_q e^{iq.R1} v_n(q), v_n(q) = sum_m V_nm(q) n_m(q). q = 0 is the Hartree matrix above */
+    {
+        auto& qgrid = *gridstructure__.qgrid();
+        auto& Rgrid_gamma = *gridstructure__.Rgrid_GammaCentered();
+        const int nq = qgrid.get_TotalSize();
+        hartree_q_.initialize({nq, num_bands, num_bands});
+        hartree_q_.fill(0.);
+        for( int iq = 1; iq < nq; ++iq ) {
+            for( int iR = 0; iR < barecoulomb_.Potential_.get_Size(0); ++iR ) {
+                int iR_glob = Rgrid_gamma.mpindex.loc1D_to_glob1D(iR);
+                auto phase = std::exp(im*qgrid[iq].dot(Rgrid_gamma[iR_glob]));
+                for( int irow = 0; irow < num_bands; ++irow ) {
+                    for( int icol = 0; icol < num_bands; ++icol ) {
+                        hartree_q_(iq, irow, icol) += phase*barecoulomb_.Potential_(iR, irow, icol);
+                    }
+                }
+            }
+        }
+#ifdef EDUS_MPI
+        if( nq > 1 ) {
+            if (decomposition__.kpool_comm().rank() == root_origin) {
+                MPI_Reduce(MPI_IN_PLACE, hartree_q_.data(), nq * num_bands * num_bands, MPI_CXX_DOUBLE_COMPLEX, MPI_SUM,
+                           root_origin, decomposition__.kpool_comm().communicator());
+            } else {
+                MPI_Reduce(hartree_q_.data(), nullptr, nq * num_bands * num_bands, MPI_CXX_DOUBLE_COMPLEX, MPI_SUM,
+                           root_origin, decomposition__.kpool_comm().communicator());
+            }
+        }
+#endif
+        /* V(q) is hermitian (V_nm(R) = V_mn(-R)): remove the numerical noise as for q = 0 */
+        for( int iq = 1; iq < nq; ++iq ) {
+            for( int irow = 0; irow < num_bands; ++irow ) {
+                for( int icol = irow; icol < num_bands; ++icol ) {
+                    auto value = (hartree_q_(iq, irow, icol) + std::conj(hartree_q_(iq, icol, irow)))/2.;
+                    hartree_q_(iq, irow, icol) = value;
+                    hartree_q_(iq, icol, irow) = std::conj(value);
+                }
+            }
+        }
+        for( int irow = 0; irow < num_bands; ++irow ) {
+            for( int icol = 0; icol < num_bands; ++icol ) {
+                hartree_q_(0, irow, icol) = Hartree(irow, icol);
+            }
+        }
+    }
+
     /* smallest eigenvalue of the Hartree matrix for the changes of the density that keep the number of electrons:
        if it is negative, moving charge along it lowers the Hartree energy and rho0 is unstable */
     hartree_min_eigenvalue_ = std::numeric_limits<double>::max();
@@ -289,6 +337,15 @@ void MeanField::self_energy(Operator<std::complex<double>>& H__, const Operator<
         return;
     }
 
+    /* density matrix with q components: the self energy has them too */
+    if( DMR__.get_nq() > 1 || HR__.get_nq() > 1 ) {
+        if( HR__.get_nq() != DMR__.get_nq() ) {
+            throw std::runtime_error("MeanField::self_energy: H and the density matrix must have the same q grid\n");
+        }
+        self_energy_q(HR__, DMR__, DM0R_);
+        return;
+    }
+
     /* Hartree term */
     if( HasOrigin_ && parameters_.hartree && (parameters_.method == MeanFieldMethod::RPA || parameters_.method == MeanFieldMethod::HSEX)) { // Only the rank with R=0 contributes to this term 
         Hartree_interaction(HR__, Hartree, DMR__, DM0R_, index_origin_local_);
@@ -316,6 +373,51 @@ void MeanField::self_energy(Operator<std::complex<double>>& H__, const Operator<
     //    }
     //} 
 }    
+
+
+/// @brief Self energy with the q components of the density matrix, Sigma[rho - rho0] with rho0 only at q = 0.
+/// With the convention of EDUS X(R;q) = 1/N sum_{R1} e^{-iq.R1} X_{nR1, mR1+R} (R conjugate to k, R1 to q):
+/// - Hartree: local potential, Sigma^H(R;q) = delta_{R0} delta_{nn'} v_n(q), v_n(q) = sum_m V_nm(q) Delta n_m(q),
+///   n_m(q) = rho_mm(R=0;q);
+/// - screened exchange: Sigma^SEX_{nR1, mR1+R} = -W_nm(R) rho_{nR1, mR1+R}, the same W(R) for every R1, so
+///   Sigma^SEX(R;q) = -W(R) Delta rho(R;q) for every q.
+/// q = 0 is the first point of the q grid. Only on cpu.
+void MeanField::self_energy_q(BlockMatrix<std::complex<double>>& HR__, const BlockMatrix<std::complex<double>>& DMR__,
+                              const BlockMatrix<std::complex<double>>& DM0R__)
+{
+    const int iq0 = 0;
+    const int nq = DMR__.get_nq();
+    const int nb = DMR__.get_nrows();
+
+    /* Hartree term */
+    if( HasOrigin_ && parameters_.hartree && (parameters_.method == MeanFieldMethod::RPA || parameters_.method == MeanFieldMethod::HSEX) ) {
+        const int iR0 = index_origin_local_;
+        for( int iq = 0; iq < nq; ++iq ) {
+            for( int irow = 0; irow < nb; ++irow ) {
+                for( int icol = 0; icol < nb; ++icol ) {
+                    auto dn = DMR__(iR0, iq, icol, icol) - ( iq == iq0 ? DM0R__(iR0, 0, icol, icol) : std::complex<double>(0.) );
+                    HR__(iR0, iq, irow, irow) += hartree_q_(iq, irow, icol)*dn;
+                }
+            }
+        }
+    }
+
+    /* screened exchange */
+    if (parameters_.method == MeanFieldMethod::HSEX) {
+        auto& W = screencoulomb_.Potential_;
+        #pragma omp parallel for collapse(2)
+        for( int iR = 0; iR < HR__.get_nk(); ++iR ) {
+            for( int iq = 0; iq < nq; ++iq ) {
+                for( int irow = 0; irow < nb; ++irow ) {
+                    for( int icol = 0; icol < nb; ++icol ) {
+                        auto drho = DMR__(iR, iq, irow, icol) - ( iq == iq0 ? DM0R__(iR, 0, irow, icol) : std::complex<double>(0.) );
+                        HR__(iR, iq, irow, icol) -= W(iR, irow, icol)*drho;
+                    }
+                }
+            }
+        }
+    }
+}
 
 
 void read_rk_py(mdarray<std::complex<double>,3>& RytovaKeldysh_TB, const std::string& filename)

@@ -117,7 +117,7 @@ class BlockMatrix{
         template<typename T_, typename U>
         friend void convolution(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& input1__, const BlockMatrix<T_>& input2__ );
         template<typename T_, typename U>
-        friend void commutator(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& input1__, const BlockMatrix<T_>& input2__, 
+        friend void commutator_k(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& input1__, const BlockMatrix<T_>& input2__, 
                                 const bool& erase_output__, const Processor& proc__);
 
 
@@ -179,10 +179,15 @@ void multiply(BlockMatrix<T>& output__, T scalar__, const BlockMatrix<T>& input1
 
 
 
-template<typename T, typename U>
-void commutator(BlockMatrix<T>& output__, U scalar__, const BlockMatrix<T>& input1__, const BlockMatrix<T>& input2__, 
-                                const bool& erase_output__ = true, const Processor& proc__=host);
-
+template <typename T_, typename U>
+void commutator(BlockMatrix<T_>& output__, 
+                  U scalar__, 
+                  const BlockMatrix<T_>& input1__, 
+                  const BlockMatrix<T_>& input2__, 
+                  const bool& erase_output__ = true, 
+                  const Processor& proc__ = host,
+                  const mdarray<int,2>* ikq__ = nullptr);
+                  
 #include "BlockMatrix_definitions.hpp"
 
 #endif

@@ -37,6 +37,10 @@ class OutputManager
         bool has_origin_ = false;
         /// Local index of R=0, if has_origin_
         int index_origin_local_ = -1;
+        /// Number of q points of the density matrix (nq > 1: only DensityQ.txt, Time.txt and the laser are written)
+        int nq_ = 1;
+        /// n_m(q,t) = rho_mm(R=0; q) in the Wannier gauge, written when nq > 1
+        std::ofstream os_density_q_;
         /// Index of the next node in the h5 file
         int index_h5_ = 0;
         /// Workspace for the velocity
@@ -81,6 +85,8 @@ class OutputManager
         /// Copies the density matrix in aux_DM, removing the Peierls phase if needed
         void copy_DM_to_aux(const double& time__);
         void print_population(const double& time__, const BandGauge& bandgauge__);
+        /// n_m(q) = rho_mm(R=0; q) (Wannier gauge) in DensityQ.txt, for nq > 1
+        void print_density_q(const double& time__);
         /// Velocity (with the self energy and the lattice) in Velocity.txt, energy balance in Energy.txt and
         /// coordinates, forces and energy of the lattice in Lattice.txt
         void print_velocity_energy(const double& time__);

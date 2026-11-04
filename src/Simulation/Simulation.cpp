@@ -57,13 +57,17 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         output::print("It is recommended to restart the simulation with the file wannier_tb.dat that I will print");
         electrons_.print_wannier("wannier_tb.dat", gridstructure_, decomposition_.kpool_comm());
     }
-    electrons_state_.initialize(gridstructure_, num_bands_, decomposition_.mpindex());
+    /* with the mean field and nq > 1 the self energy has q components: H_ gets them too */
+    auto meanfield_parameters = electron::MeanFieldParametersFactory::create( ctx_->cfg() );
+    const bool hamiltonian_with_q = ( gridstructure_.qgrid()->get_TotalSize() > 1 && meanfield_parameters.enabled );
+    electrons_state_.initialize(gridstructure_, num_bands_, decomposition_.mpindex(), decomposition_.mpindex_q(),
+                                hamiltonian_with_q);
 
     //TODO: remove next lines
     Operator<std::complex<double>>::EigenVectors = &electrons_.bandstructure().U();
     Operator<std::complex<double>>::EigenVectors_dagger = &electrons_.bandstructure().Udagger();
 
-    meanfield_.initialize( electron::MeanFieldParametersFactory::create( ctx_->cfg() ), 
+    meanfield_.initialize( meanfield_parameters, 
                            gridstructure_, 
                            electrons_.wannier_centers(), 
                            decomposition_ );

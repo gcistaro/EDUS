@@ -21,6 +21,21 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
     kgradient_  = &kgradient__;
     lattice_    = lattice__;
     Rgrid_gamma_ = gridstructure__.Rgrid_GammaCentered();
+    ikq_ = &gridstructure__.ikq();
+    iqmp_ = &gridstructure__.iqmp();
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 && mpi::Communicator::world().size() > 1 ) {
+        throw std::runtime_error("Propagator: nq > 1 is implemented only with 1 MPI rank for now\n");
+    }
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 && !parameters_.peierls && parameters_.gradient_space != R ) {
+        throw std::runtime_error("Propagator: nq > 1 without Peierls requires gradient_space = R\n");
+    }
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 && lattice__ ) {
+        throw std::runtime_error("Propagator: nq > 1 is not implemented with phonons\n");
+    }
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 && meanfield__.parameters().enabled
+        && state__.H().get_nq() != gridstructure__.qgrid()->get_TotalSize() ) {
+        throw std::runtime_error("Propagator: with the mean field and nq > 1 the Hamiltonian must have the q components\n");
+    }
 
     /* R vectors in a contiguous array, used on gpu for the Peierls phase */
     auto nR_local = Rgrid_gamma_->mpindex.get_nlocal();
@@ -32,6 +47,18 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         }
     }
 
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 ) {
+        if( parameters_.desolver.solver == MAGNUS ) {
+            throw std::runtime_error("Propagator: the Magnus time stepper is not available with nq > 1: use RK or AB\n");
+        }
+        if( processor_ == device ) {
+            throw std::runtime_error("Propagator: nq > 1 is not available on gpu\n");
+        }
+        /* equilibrium density matrix with the Peierls phase, for the decay (nq = 1, aux_DM_ has nq blocks) */
+        if( parameters_.peierls && parameters_.decay > 1.e-07 ) {
+            dm0_peierls_.initialize_fft(system_->DM0(), "DM0_peierls");
+        }
+    }
     initial_condition(state_->DensityMatrix());
     if( lattice_ ) {
         if( parameters_.desolver.solver == MAGNUS ) {
@@ -158,7 +185,22 @@ void Propagator::initial_condition(Operator<std::complex<double>>& DM__)
 {
     PROFILE("Propagator::initial_condition");
     auto& DM0k = system_->DM0().get_Operator(Space::k);
-    std::copy(DM0k.begin(), DM0k.end(), DM__.get_Operator_k().begin());
+    auto& DMk = DM__.get_Operator_k();
+    if( DMk.get_nq() == 1 ) {
+        std::copy(DM0k.begin(), DM0k.end(), DMk.begin());
+    }
+    else {
+        /* with nq > 1 the equilibrium density matrix is the q = 0 slice; rho(k, q != 0) = 0 */
+        const int iq0 = 0; // q = 0 is the first point of the q grid
+        DMk.fill(0.);
+        for( int ik = 0; ik < DM0k.get_nk(); ++ik ) {
+            for( int irow = 0; irow < DM0k.get_nrows(); ++irow ) {
+                for( int icol = 0; icol < DM0k.get_ncols(); ++icol ) {
+                    DMk(ik, iq0, irow, icol) = DM0k(ik, 0, irow, icol);
+                }
+            }
+        }
+    }
 
     DM__.lock_gauge(wannier);
     DM__.lock_space(k);
@@ -246,7 +288,14 @@ void Propagator::derivative_electrons(Operator<std::complex<double>>& Output__, 
     auto& Input = Input__.get_Operator(propagation_space_);
     auto& H = H_.get_Operator(propagation_space_);
 
-    commutator(Output, -im, H, Input, false, processor_);
+    if( H.get_nq() > 1 ) {
+        /* H with q components (mean field): Output(k,q) += -i*sum_p ( H(k+p,q-p) rho(k,p) - rho(k+p,q-p) H(k,p) ) */
+        commutator_kq_general(Output, -im, H, Input, *ikq_, *iqmp_);
+    }
+    else {
+        /* with nq > 1: Output(k,q) += -i*( H(k+q) rho(k,q) - rho(k,q) H(k) ) */
+        commutator(Output, -im, H, Input, false, processor_, ( Input.get_nq() > 1 ? ikq_ : nullptr ));
+    }
 
     /* decay towards equilibrium: d(rho)/dt += -(rho - rho0)/decay.
        In the Peierls gauge the propagated density matrix is phase(+1)*rho, so the equilibrium one is
@@ -254,17 +303,24 @@ void Propagator::derivative_electrons(Operator<std::complex<double>>& Output__, 
     if( parameters_.decay > 1.e-07 ) {
         const BlockMatrix<std::complex<double>>* DM0k = &system_->DM0().get_Operator(Space::k);
         if(parameters_.peierls && with_field__) {
-            copy(system_->DM0().get_Operator(R), aux_DM_.get_Operator(R), processor_);
-            aux_DM_.lock_space(R);
-            apply_peierls_phase(aux_DM_, time__, +1, processor_);
-            aux_DM_.go_to_k();
-            DM0k = &aux_DM_.get_Operator(Space::k);
+            /* with nq > 1 aux_DM_ has nq blocks: the phase is applied to a copy of DM0 with nq = 1 */
+            auto& dm0_phase = ( Input.get_nq() > 1 ? dm0_peierls_ : aux_DM_ );
+            copy(system_->DM0().get_Operator(R), dm0_phase.get_Operator(R), processor_);
+            dm0_phase.lock_space(R);
+            apply_peierls_phase(dm0_phase, time__, +1, processor_);
+            dm0_phase.go_to_k();
+            DM0k = &dm0_phase.get_Operator(Space::k);
         }
-        #pragma omp parallel for
-        for(int ik=0; ik<Input.get_nblocks(); ik++) {
-            for(int irow=0; irow < Input.get_nrows(); irow++ ) {
-                for(int icol=0; icol < Input.get_ncols(); icol++) {
-                    Output(ik,irow,icol) -= ( Input(ik,irow,icol)-(*DM0k)(ik,irow,icol) )/parameters_.decay;
+        /* with nq > 1 the equilibrium is rho0 at q = 0 and zero at q != 0 */
+        const int iq0 = 0; // q = 0 is the first point of the q grid
+        #pragma omp parallel for collapse(2)
+        for(int ik=0; ik<Input.get_nk(); ik++) {
+            for(int iq=0; iq<Input.get_nq(); iq++) {
+                for(int irow=0; irow < Input.get_nrows(); irow++ ) {
+                    for(int icol=0; icol < Input.get_ncols(); icol++) {
+                        auto rho0 = ( iq == iq0 ? (*DM0k)(ik,0,irow,icol) : std::complex<double>(0.) );
+                        Output(ik,iq,irow,icol) -= ( Input(ik,iq,irow,icol) - rho0 )/parameters_.decay;
+                    }
                 }
             }
         }
@@ -347,11 +403,13 @@ void ipa_hamiltonian_cpu( BlockMatrix<std::complex<double>>& H,
                                   const BlockMatrix<std::complex<double>>& z,
                                   const Vector<double>& las)
 {
+    /* H0 + E.r is diagonal in q: with H with q components (nq > 1) it is only in the q = 0 slice (first point) */
+    const int iq0 = 0;
 #pragma omp parallel for schedule(static) collapse(3)
     for (int iblock = 0; iblock < H0.get_nblocks(); ++iblock) {
         for (int irow = 0; irow < H0.get_nrows(); ++irow) {
             for (int icol = 0; icol < H0.get_ncols(); ++icol) {
-                H(iblock, irow, icol) += H0(iblock, irow, icol)
+                H(iblock, iq0, irow, icol) += H0(iblock, irow, icol)
                     + las[0] * x(iblock, irow, icol)
                     + las[1] * y(iblock, irow, icol)
                     + las[2] * z(iblock, irow, icol);
@@ -449,16 +507,20 @@ void apply_peierls_phase_cpu( BlockMatrix<std::complex<double>>& OR__,
                               int sign)
 {
 #pragma omp parallel for schedule(static)
-    for (int iR_loc = 0; iR_loc < OR__.get_nblocks(); ++iR_loc) {
+    for (int iR_loc = 0; iR_loc < OR__.get_nk(); ++iR_loc) {
         int iR_glob = Rgrid_gamma.mpindex.loc1D_to_glob1D(iR_loc);
         Peierls_phase(iR_loc) = std::exp(im*double(sign)*At.dot(Rgrid_gamma[iR_glob]));
     }
 
-#pragma omp parallel for schedule(static) collapse(3)
-    for (int iblock = 0; iblock < OR__.get_nblocks(); ++iblock) {
-        for (int irow = 0; irow < OR__.get_nrows(); ++irow) {
-            for (int icol = 0; icol < OR__.get_ncols(); ++icol) {
-                OR__(iblock, irow, icol) *= Peierls_phase(iblock);
+    /* rho(k,q) -> rho(k+A,q): A shifts k and k+q in the same way, so the phase depends only on R and is the
+       same for every q */
+#pragma omp parallel for schedule(static) collapse(4)
+    for (int iR_loc = 0; iR_loc < OR__.get_nk(); ++iR_loc) {
+        for (int iq = 0; iq < OR__.get_nq(); ++iq) {
+            for (int irow = 0; irow < OR__.get_nrows(); ++irow) {
+                for (int icol = 0; icol < OR__.get_ncols(); ++icol) {
+                    OR__(iR_loc, iq, irow, icol) *= Peierls_phase(iR_loc);
+                }
             }
         }
     }

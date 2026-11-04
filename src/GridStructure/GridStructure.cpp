@@ -46,6 +46,34 @@ void GridStructure::initialize(const std::array<int,3>& size__, const std::array
     }
     /* the q grid is not distributed among the ranks */
     q_ = std::make_shared<MeshGrid>(MeshGrid(k, qsize__, 0., false));
+
+    /* map k -> k + q on the k grid */
+    int nk = k_->get_TotalSize();
+    int nq = q_->get_TotalSize();
+    ikq_.initialize({nk, nq});
+    for (int ik = 0; ik < nk; ++ik) {
+        for (int iq = 0; iq < nq; ++iq) {
+            ikq_(ik, iq) = k_->find((*k_)[ik] + (*q_)[iq]);
+            if (ikq_(ik, iq) == -1) {
+                std::stringstream ss;
+                ss << "k + q not found in the k grid: ik = " << ik << ", iq = " << iq << "\n";
+                throw std::runtime_error(ss.str());
+            }
+        }
+    }
+
+    /* map (q, p) -> q - p on the q grid */
+    iqmp_.initialize({nq, nq});
+    for (int iq = 0; iq < nq; ++iq) {
+        for (int ip = 0; ip < nq; ++ip) {
+            iqmp_(iq, ip) = q_->find((*q_)[iq] - (*q_)[ip]);
+            if (iqmp_(iq, ip) == -1) {
+                std::stringstream ss;
+                ss << "q - p not found in the q grid: iq = " << iq << ", ip = " << ip << "\n";
+                throw std::runtime_error(ss.str());
+            }
+        }
+    }
 }
 
 

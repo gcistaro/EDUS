@@ -21,7 +21,11 @@ private:
 
 public: 
         State() = default;
-        void initialize(const GridStructure& gridstructure__, const int& num_bands__, const MPIindex<3>& mpindex);
+        void initialize(const GridStructure& gridstructure__, 
+                                  const int& num_bands__, 
+                                  const MPIindex<3>& mpindex__,
+                                  const MPIindex<3>& mpindex_q__,
+                                  const bool& hamiltonian_with_q__ = false);
         /// Allocates and copies to device the variables used in time propagation
         void initialize_device();
 
@@ -37,15 +41,26 @@ public:
     };
 
 
-    inline void State::initialize(const GridStructure& gridstructure__, const int& num_bands__, const MPIindex<3>& mpindex)
+    inline void State::initialize(const GridStructure& gridstructure__, 
+                                  const int& num_bands__, 
+                                  const MPIindex<3>& mpindex__,
+                                  const MPIindex<3>& mpindex_q__,
+                                  const bool& hamiltonian_with_q__)
     {
         auto num_bands = num_bands__;
         auto num_kpoints = gridstructure__.kgrid()->get_TotalSize();
 
-        H_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "H");
-        variables_.rho.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "DensityMatrix");
-        aux_DM_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex, "aux_DM");
-        Peierls_phase_.initialize({mpindex.get_nlocal()});
+        /* H_ has the q components only when the level of theory needs them (mean field with nq > 1: the self
+           energy has the q components of rho); otherwise H(k,q) = delta_{q0} H(k) and H_ has nq = 1 */
+        if( hamiltonian_with_q__ ) {
+            H_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex_q__, "H", gridstructure__.qgrid());
+        }
+        else {
+            H_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex__, "H");
+        }
+        variables_.rho.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex_q__, "DensityMatrix", gridstructure__.qgrid());
+        aux_DM_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), num_bands, mpindex_q__, "aux_DM", gridstructure__.qgrid());
+        Peierls_phase_.initialize({mpindex__.get_nlocal()});
     }
 
     inline void State::initialize_device()

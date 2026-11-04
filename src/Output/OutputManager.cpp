@@ -22,6 +22,7 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     lasers_        = &lasers__;
 
     is_writer_ = ( mpi::Communicator::world().rank() == 0 );
+    nq_ = state_->DensityMatrix().get_nq();
 
     /* define the index of Rgrid where (0,0,0) is */
     int index_origin_global = gridstructure__.Rgrid()->find(Coordinate(0,0,0));
@@ -66,6 +67,17 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         os_velocity_.open(path("Velocity.txt"));
         if( parameters_.write_velocity_sigma ) {
             os_velocity_sigma_.open(path("Velocity_sigma.txt"));
+        }
+        if( nq_ > 1 ) {
+            os_density_q_.open(path("DensityQ.txt"));
+            os_density_q_ << "# n_m(q,t) = rho_mm(R=0; q) = 1/N sum_k rho_mm(k,q), Wannier gauge (q = 0: Population_wannier.txt)\n"
+                          << "# q points (crystal coordinates of the reciprocal lattice):\n";
+            auto& qgrid = *gridstructure__.qgrid();
+            for( int iq = 0; iq < nq_; ++iq ) {
+                auto& qc = qgrid[iq].get(LatticeVectors(k));
+                os_density_q_ << "#   iq = " << iq << ": " << qc[0] << " " << qc[1] << " " << qc[2] << "\n";
+            }
+            os_density_q_ << "# columns: time, then for iq = 0..nq-1 and band m: Re n_m(q), Im n_m(q)\n";
         }
         os_energy_.open(path("Energy.txt"));
         auto* lattice = propagator_->lattice();
@@ -139,7 +151,9 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     }
 
 #ifdef EDUS_HDF5
-    initialize_h5(input_dict__, gridstructure__);
+    if( nq_ == 1 ) {
+        initialize_h5(input_dict__, gridstructure__);
+    }
 #endif
 }
 
@@ -167,6 +181,11 @@ void OutputManager::write(const double& time__)
             os_time_ << time__ << std::endl;
             os_laser_ << (*lasers_)(time__).get("Cartesian");
             os_vectorpot_ << lasers_->VectorPotential(time__).get("Cartesian");
+        }
+        /* with nq > 1 populations, velocity and energy are not generalized yet: only n(q,t) */
+        if( nq_ > 1 ) {
+            print_density_q(time__);
+            return;
         }
         print_population(time__, BandGauge::bloch);
         print_population(time__, BandGauge::wannier);
@@ -255,6 +274,42 @@ void OutputManager::print_population(const double& time__, const BandGauge& band
             os << " ";
         }
         os << std::endl;
+    }
+    aux.set_processor(propagator_->processor());
+}
+
+void OutputManager::print_density_q(const double& time__)
+{
+    copy_DM_to_aux(time__);
+    auto& aux = state_->aux_DM();
+    aux.go_to_R();
+
+    auto& auxR = aux.get_Operator_R();
+    int num_bands = auxR.get_nrows();
+    /* real and imaginary part of n_m(q), index 2*(iq*num_bands + m) */
+    std::vector<double> density(2 * nq_ * num_bands, 0.);
+    if( has_origin_ ) {
+        for( int iq = 0; iq < nq_; ++iq ) {
+            for( int ibnd = 0; ibnd < num_bands; ++ibnd ) {
+                auto value = auxR(index_origin_local_, iq, ibnd, ibnd);
+                density[2 * (iq * num_bands + ibnd)]     = value.real();
+                density[2 * (iq * num_bands + ibnd) + 1] = value.imag();
+            }
+        }
+    }
+#ifdef EDUS_MPI
+    /* only one rank has R=0: the sum brings its values to rank 0 */
+    auto& comm = decomposition_->kpool_comm();
+    MPI_Reduce( comm.rank() == 0 ? MPI_IN_PLACE : density.data(), density.data(),
+                int(density.size()), MPI_DOUBLE, MPI_SUM, 0, comm.communicator() );
+#endif
+
+    if( is_writer_ ) {
+        os_density_q_ << std::setw(20) << std::setprecision(10) << time__;
+        for( auto value : density ) {
+            os_density_q_ << " " << std::setw(24) << std::setprecision(14) << value;
+        }
+        os_density_q_ << std::endl;
     }
     aux.set_processor(propagator_->processor());
 }

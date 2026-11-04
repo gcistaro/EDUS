@@ -277,7 +277,12 @@ void convolution(BlockMatrix<T>& output__, U scalar__, const BlockMatrix<T>& inp
 }
 
 template<typename T_, typename U>
-void commutator(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& input1__, const BlockMatrix<T_>& input2__, const bool& erase_output__, const Processor& proc__)
+void commutator_k(BlockMatrix<T_>& output__, 
+                  U scalar__, 
+                  const BlockMatrix<T_>& input1__, 
+                  const BlockMatrix<T_>& input2__, 
+                  const bool& erase_output__, 
+                  const Processor& proc__)
 {
 #ifdef EDUS_TIMERS
     PROFILE("Commutator");
@@ -301,6 +306,80 @@ void commutator(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& in
     }
 }
 
+/// output(k,q) += s * sum_p [ A(k+p, q-p) B(k,p) - B(k+p, q-p) A(k,p) ]
+/// Commutator of two operators that both have q components: X_nm(k,q) = <n,k+q|X|m,k>, so that
+/// (XY)(k,q) = sum_p X(k+p,q-p) Y(k,p). ikq__(ik, ip) = index of k + q[ip] in the k grid,
+/// iqmp__(iq, ip) = index of q[iq] - q[ip] in the q grid. For now only 1 rank (local index = global index).
+template <typename T_, typename U>
+void commutator_kq_general(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& A__,
+                           const BlockMatrix<T_>& B__, const mdarray<int,2>& ikq__, const mdarray<int,2>& iqmp__)
+{
+    const int nk = B__.get_nk();
+    const int nq = B__.get_nq();
+    assert( A__.get_nk() == nk && A__.get_nq() == nq );
+    assert( output__.get_nk() == nk && output__.get_nq() == nq );
+    const T_ s = scalar__;
+    const T_ one = 1.;
+    /* each (ik, iq) writes only its own block: no race */
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int ik = 0; ik < nk; ++ik) {
+        for (int iq = 0; iq < nq; ++iq) {
+            const int iblock = ik*nq + iq;
+            for (int ip = 0; ip < nq; ++ip) {
+                const int ikp = ikq__(ik, ip);
+                const int iqp = iqmp__(iq, ip);
+                Matrix_gemm(output__[iblock],  s, A__[ikp*nq + iqp], B__[ik*nq + ip], one);
+                Matrix_gemm(output__[iblock], -s, B__[ikp*nq + iqp], A__[ik*nq + ip], one);
+            }
+        }
+    }
+}
+
+/// Output(k,q) += scalar*( H(k+q) rho(k,q) - rho(k,q) H(k) ), H diagonal in k (nq = 1), rho with nq.
+/// ikq__(ik, iq) = index of k + q[iq] in the k grid. For now only 1 rank (local index = global index).
+template <typename T_, typename U>
+void commutator_kq(BlockMatrix<T_>& output__, 
+                  U scalar__, 
+                  const BlockMatrix<T_>& input1__, 
+                  const BlockMatrix<T_>& input2__, 
+                  const bool& erase_output__, 
+                  const Processor& proc__,
+                  const mdarray<int,2>& ikq__)
+{
+    assert( input1__.get_nq() == 1 );
+    const int nk = input2__.get_nk();
+    const int nq = input2__.get_nq();
+    assert( input1__.get_nk() == nk && output__.get_nk() == nk && output__.get_nq() == nq );
+    assert( proc__ == host ); //TODO: gpu version
+    if( erase_output__ ) {
+        output__.fill(0.);
+    }
+    #pragma omp parallel for collapse(2)
+    for( int ik = 0; ik < nk; ++ik ) {
+        for( int iq = 0; iq < nq; ++iq ) {
+            const int iblock = ik*nq + iq;
+            Matrix_gemm(output__[iblock],  scalar__, input1__[ikq__(ik, iq)], input2__[iblock], 1.+im*0.);
+            Matrix_gemm(output__[iblock], -scalar__, input2__[iblock], input1__[ik], 1.+im*0.);
+        }
+    }
+}
+
+
+template <typename T_, typename U>
+void commutator(BlockMatrix<T_>& output__, 
+                  U scalar__, 
+                  const BlockMatrix<T_>& input1__, 
+                  const BlockMatrix<T_>& input2__, 
+                  const bool& erase_output__, 
+                  const Processor& proc__,
+                  const mdarray<int,2>* ikq__)
+{
+    if (! ikq__) {
+            commutator_k(output__, scalar__, input1__, input2__, erase_output__, proc__);
+        } else {
+            commutator_kq(output__, scalar__, input1__, input2__, erase_output__, proc__, *ikq__);
+        }
+}
 
 template<typename T>
 void BlockMatrix<T>::diagonalize(std::vector<mdarray<double,1>>& eigenvalues__,

@@ -46,6 +46,12 @@ class Propagator : public CommutatorEquation
         const kGradient* kgradient_ = nullptr;
         /// R grid centered in Gamma, used for the Peierls phase
         std::shared_ptr<MeshGrid> Rgrid_gamma_;
+        /// ikq_(ik, iq) = index of k + q[iq] in the k grid, used in the commutator when nq > 1
+        const mdarray<int,2>* ikq_ = nullptr;
+        /// iqmp_(iq, ip) = index of q[iq] - q[ip] in the q grid, used in the commutator when H has q components
+        const mdarray<int,2>* iqmp_ = nullptr;
+        /// equilibrium density matrix with the Peierls phase (nq = 1), used for the decay when nq > 1
+        Operator<std::complex<double>> dm0_peierls_;
         /// Same as Rgrid_gamma_ (local part, cartesian), in a contiguous array for the gpu
         mdarray<double,2> bare_Rgrid_gamma_;
 
