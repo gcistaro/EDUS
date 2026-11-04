@@ -139,6 +139,11 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         if( lattice ) {
             int nmodes = lattice->num_modes();
             os_lattice_.open(path("Lattice.txt"));
+            if( nq_ > 1 ) {
+                os_lattice_q_.open(path("LatticeQ.txt"));
+                os_lattice_q_ << "# Displacements u_mu(q) (bohr) of all the q points of the grid, u(R) = sum_q u(q) e^{iq.R}\n"
+                              << "# columns: time (a.u.), then for iq = 0..nq-1 and mu = 0.." << nmodes - 1 << ": Re u_mu(q), Im u_mu(q)\n";
+            }
             os_force_check_.open(path("Force_check.txt"));
             os_force_check_ << "# Check of the force on the lattice: F_R = s sum_R sum_mn g_mn(R) conj(rho - rho_BO)_mn(R) (force used in the\n"
                             << "# dynamics, Lattice.txt) against F_k = s/N sum_k Tr[g(k) (rho - rho_BO)(k)], same density matrices (Ha/bohr)\n"
@@ -656,12 +661,12 @@ void OutputManager::print_velocity_energy(const double& time__)
     const Operator<std::complex<double>>* rho_bo = nullptr;
     if( lattice ) {
         aux.go_to_R();
-        force_full = lattice->force(aux, system_->DM0());
+        force_full = phonon::Lattice::force_gamma(lattice->force(aux, system_->DM0()));
         if( dynamic ) {
             auto& rho_bo_dynamic = state_->variables().rho_bo;
             rho_bo_dynamic.lock_space(Space::k);
             rho_bo_dynamic.go_to_R();
-            force_bo = lattice->force(rho_bo_dynamic, system_->DM0());
+            force_bo = phonon::Lattice::force_gamma(lattice->force(rho_bo_dynamic, system_->DM0()));
             local[8] = trace_product_difference(system_->H0().get_Operator(Space::k), rho_bo_dynamic.get_Operator(Space::k), rho0);
             rho_bo = &rho_bo_dynamic;
         }
@@ -669,7 +674,7 @@ void OutputManager::print_velocity_energy(const double& time__)
             lattice->adiabatic_density(rho_bo_, state_->lattice(), system_->DM0());
             rho_bo = &rho_bo_;
         }
-        force_excited = lattice->force(aux, *rho_bo);
+        force_excited = phonon::Lattice::force_gamma(lattice->force(aux, *rho_bo));
         /* check of the R formula: the same force directly in k */
         {
             auto& ref = const_cast<Operator<std::complex<double>>&>(*rho_bo);
@@ -678,7 +683,7 @@ void OutputManager::print_velocity_energy(const double& time__)
                 rho_bo_.go_to_k();
             }
             ref.lock_space(Space::k);
-            auto force_check = lattice->force_k(aux, ref);
+            auto force_check = phonon::Lattice::force_gamma(lattice->force_k(aux, ref));
             double diff = 0., norm = 0.;
             for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
                 diff = std::max(diff, std::abs(force_excited[mu] - force_check[mu]));
@@ -866,6 +871,14 @@ void OutputManager::print_velocity_energy(const double& time__)
                 os_lattice_ << std::setw(22) << std::setprecision(12) << force_excited[mu];
             }
             os_lattice_ << std::endl;
+            os_lattice_q_ << std::setw(22) << std::setprecision(12) << time__;
+            for( int iq = 0; iq < x.num_qpoints(); ++iq ) {
+                for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                    os_lattice_q_ << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).real()
+                                  << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).imag();
+                }
+            }
+            os_lattice_q_ << std::endl;
         }
         return;
     }

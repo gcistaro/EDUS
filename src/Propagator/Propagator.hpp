@@ -36,7 +36,7 @@ class Propagator : public CommutatorEquation
         /// Lattice coupled to the electrons; nullptr without phonons
         const phonon::Lattice* lattice_ = nullptr;
         /// Force of the electrons on the lattice, computed with the last Hamiltonian
-        std::vector<double> force_;
+        phonon::Lattice::Force force_;
         /// Adiabatic density matrix rho_BO at the current stage: the force on the lattice is the one of rho - rho_BO,
         /// and with the screened coupling the mean field is Sigma[rho - rho_BO]. It points to rho_bo_static_ or to the
         /// rho_BO propagated in the state (dynamic reference)

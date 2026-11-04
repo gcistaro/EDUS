@@ -1213,88 +1213,123 @@ double Lattice::antisymmetric_power(const Coordinates& x__) const
     return power;
 }
 
-/// @brief Force of the electrons on the lattice, F_mu = s/N sum_k Tr[g_mu(k) (rho(k) - rho_ref(k))], with g_b.
+/// @brief Force of the electrons on the lattice at every q, with g_b:
+///     F_mu(q) = s/N sum_k Tr[g_mu(k,q)^dagger (rho - rho_ref)(k,q)],      F_mu(-q) = F_mu(q)^*.
+///
+/// It is the derivative of the coupling energy per cell, E_c = s/N sum_{k,q} Tr[H_c(k+q,-q) Delta rho(k,q)] with
+/// H_c(k,q) = sum_mu u_mu(q) g_mu(k,q) and g(k+q,-q) = g(k,q)^dagger: E_c = sum_{q,mu} u_mu(q)^* F_mu(q), so that the
+/// atoms feel -dE_c/du(q)^* = -F(q) (see derivative). At q = 0 g is hermitian and F is the force of the electrons on
+/// the uniform displacement (only its real part is kept, the imaginary part is the error of the interpolation).
 ///
 /// It is computed in R, where rho is already available during the propagation (the self energy is computed in R
 /// too), using Parseval with the convention O(k) = sum_R e^{ik.R} O(R):
-///     1/N sum_k Tr[A(k) B(k)] = sum_R Tr[A(R) B(-R)] = sum_R sum_mn A_mn(R) conj(B_mn(R))   (B hermitian).
+///     1/N sum_k sum_mn conj(A_mn(k)) B_mn(k) = sum_R sum_mn conj(A_mn(R)) B_mn(R).
 /// rho__ must be the physical density matrix (without the Peierls phase) with its R component up to date;
 /// reference__ is rho0 (the whole change of rho, at equilibrium the geometry is relaxed) or rho_BO (only the excited
-/// part, the force used in the dynamics). The atoms feel -F (see derivative).
-std::vector<double> Lattice::force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
+/// part, the force used in the dynamics). The q points are the ones of rho__ (only q = 0 for the q = 0 slice used by
+/// the output); a reference with q = 0 only (rho0) is zero at q != 0.
+Lattice::Force Lattice::force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
 {
     auto& rho = rho__.get_Operator(R);
     auto& rho0 = reference__.get_Operator(R);
-    std::vector<double> F(num_modes_, 0.);
+    const int nq = std::min(rho.get_nq(), coupling_[0].get_Operator(R).get_nq());
+    const int nq_ref = rho0.get_nq();
+    Force F({nq, num_modes_});
+    F.fill(0.);
     for( int mu = 0; mu < num_modes_; ++mu ) {
         auto& gR = coupling_[mu].get_Operator(R);
-        double sum = 0.;
-        /* only q = 0 for now (nq > 1: the q = 0 slice of g, rho and the reference; F(q != 0) is not computed yet) */
-        #pragma omp parallel for reduction(+:sum)
-        for( int iR = 0; iR < gR.get_nk(); ++iR ) {
-            for( int i = 0; i < num_bands_; ++i ) {
-                for( int j = 0; j < num_bands_; ++j ) {
-                    sum += (gR(iR, 0, i, j) * std::conj(rho(iR, 0, i, j) - rho0(iR, 0, i, j))).real();
+        for( int iq = 0; iq < nq; ++iq ) {
+            double re = 0., im_ = 0.;
+            #pragma omp parallel for reduction(+:re,im_)
+            for( int iR = 0; iR < gR.get_nk(); ++iR ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        auto drho = rho(iR, iq, i, j) - ( iq < nq_ref ? rho0(iR, iq, i, j) : std::complex<double>(0.) );
+                        auto x = std::conj(gR(iR, iq, i, j)) * drho;
+                        re += x.real();
+                        im_ += x.imag();
+                    }
                 }
             }
+            /* EDUS propagates one spin channel: the force of all the electrons has the spin degeneracy s */
+            F(iq, mu) = parameters_.spin_degeneracy * std::complex<double>(re, iq == 0 ? 0. : im_);
         }
-        /* EDUS propagates one spin channel: the force of all the electrons has the spin degeneracy s */
-        F[mu] = parameters_.spin_degeneracy * sum;
     }
     /* each rank has summed its R points. With acoustic_sum_rule the total force on the center of mass is zero here
-       without corrections: the translation was removed from g (remove_translation_from_coupling) */
+       without corrections: the translation was removed from g at q = 0 (remove_translation_from_coupling) */
 #ifdef EDUS_MPI
-    MPI_Allreduce(MPI_IN_PLACE, F.data(), num_modes_, MPI_DOUBLE, MPI_SUM, comm_->communicator());
+    MPI_Allreduce(MPI_IN_PLACE, F.data(), nq * num_modes_, MPI_C_DOUBLE_COMPLEX, MPI_SUM, comm_->communicator());
 #endif
     return F;
 }
 
-/// @brief Force of the electrons on the lattice computed in k, F_mu = s/N sum_k Tr[g_mu(k) (rho(k) - rho_ref(k))]:
-/// only to check the R formula of force() (with the complex conjugate), on the same density matrices.
-std::vector<double> Lattice::force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
+/// @brief The same force computed in k, F_mu(q) = s/N sum_k sum_mn conj(g_mu,mn(k,q)) (rho - rho_ref)_mn(k,q):
+/// only to check the R formula of force(), on the same density matrices.
+Lattice::Force Lattice::force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const
 {
     auto& rho = rho__.get_Operator(Space::k);
     auto& rho0 = reference__.get_Operator(Space::k);
-    std::vector<double> F(num_modes_, 0.);
+    const int nq = std::min(rho.get_nq(), coupling_[0].get_Operator(Space::k).get_nq());
+    const int nq_ref = rho0.get_nq();
+    Force F({nq, num_modes_});
+    F.fill(0.);
     for( int mu = 0; mu < num_modes_; ++mu ) {
         auto& gk = coupling_[mu].get_Operator(Space::k);
-        double sum = 0.;
-        #pragma omp parallel for reduction(+:sum)
-        for( int ik = 0; ik < gk.get_nk(); ++ik ) {
-            for( int n = 0; n < num_bands_; ++n ) {
-                for( int m = 0; m < num_bands_; ++m ) {
-                    sum += (gk(ik, 0, n, m) * (rho(ik, 0, m, n) - rho0(ik, 0, m, n))).real();
+        for( int iq = 0; iq < nq; ++iq ) {
+            double re = 0., im_ = 0.;
+            #pragma omp parallel for reduction(+:re,im_)
+            for( int ik = 0; ik < gk.get_nk(); ++ik ) {
+                for( int n = 0; n < num_bands_; ++n ) {
+                    for( int m = 0; m < num_bands_; ++m ) {
+                        auto drho = rho(ik, iq, n, m) - ( iq < nq_ref ? rho0(ik, iq, n, m) : std::complex<double>(0.) );
+                        auto x = std::conj(gk(ik, iq, n, m)) * drho;
+                        re += x.real();
+                        im_ += x.imag();
+                    }
                 }
             }
+            F(iq, mu) = std::complex<double>(re, iq == 0 ? 0. : im_);
         }
-        F[mu] = sum;
     }
 #ifdef EDUS_MPI
-    MPI_Allreduce(MPI_IN_PLACE, F.data(), num_modes_, MPI_DOUBLE, MPI_SUM, comm_->communicator());
+    MPI_Allreduce(MPI_IN_PLACE, F.data(), nq * num_modes_, MPI_C_DOUBLE_COMPLEX, MPI_SUM, comm_->communicator());
 #endif
     double num_k = coupling_[0].get_Operator(Space::k).get_MeshGrid()->get_TotalSize();
-    for( auto& f : F ) {
-        f *= parameters_.spin_degeneracy / num_k;
+    for( int iq = 0; iq < nq; ++iq ) {
+        for( int mu = 0; mu < num_modes_; ++mu ) {
+            F(iq, mu) *= parameters_.spin_degeneracy / num_k;
+        }
     }
     return F;
 }
 
-/// @brief Right hand side of the equations of motion of the lattice, written as a first-order system:
-///     du/dt = v,     dv/dt = -(K u + F)/M - (2/tau) v
-/// Newton's equation M u'' = -K u - F with the harmonic force -K u, the force -F of the electrons and a
-/// phenomenological friction that makes the amplitude decay as exp(-t/tau).
-void Lattice::derivative(Coordinates& dx__, const Coordinates& x__, const std::vector<double>& F__) const
+/// @brief Real force at q = 0 (the uniform displacement), from the force at all q of force()
+std::vector<double> Lattice::force_gamma(const Force& F__)
+{
+    std::vector<double> F(F__.get_Size(1));
+    for( int mu = 0; mu < int(F.size()); ++mu ) {
+        F[mu] = F__(0, mu).real();
+    }
+    return F;
+}
+
+/// @brief Right hand side of the equations of motion of the lattice, written as a first-order system for every q:
+///     du(q)/dt = v(q),     dv(q)/dt = -(K(q) u(q) + F(q))/M - (2/tau) v(q)
+/// Newton's equation M u''(q) = -K(q) u(q) - F(q) (from the energy per cell sum_q [1/2 M |v(q)|^2 + 1/2 u(q)^dagger K(q) u(q)
+/// + u(q)^* F(q)], varying u(q)^*) with the harmonic force, the force of the electrons and a phenomenological friction
+/// that makes the amplitude decay as exp(-t/tau). The q are independent, coupled only through the electrons.
+/// u(-q) = u(q)^* holds if it holds at t = 0, since K(-q) = K(q)^* and F(-q) = F(q)^*.
+void Lattice::derivative(Coordinates& dx__, const Coordinates& x__, const Force& F__) const
 {
     double friction = parameters_.damping_time > 1.e-07 ? 2. / parameters_.damping_time : 0.;
     for( int iq = 0; iq < x__.num_qpoints(); ++iq ) {
         for( int mu = 0; mu < num_modes_; ++mu ) {
-            /* harmonic force: (K u)_mu, coupling all the cartesian coordinates at the same q */
+            /* harmonic force: (K(q) u(q))_mu, coupling all the cartesian coordinates at the same q */
             std::complex<double> Ku = 0.;
             for( int nu = 0; nu < num_modes_; ++nu ) {
                 Ku += force_constants_(iq, mu, nu) * x__.displacement(iq, nu);
             }
-            /* only q = 0 is coupled to the electrons */
-            double F = (iq == 0 ? F__[mu] : 0.);
+            std::complex<double> F = ( iq < F__.get_Size(0) ? F__(iq, mu) : std::complex<double>(0.) );
             dx__.displacement(iq, mu) = x__.velocity(iq, mu);
             dx__.velocity(iq, mu) = -(Ku + F) / mass_[mu] - friction * x__.velocity(iq, mu);
         }

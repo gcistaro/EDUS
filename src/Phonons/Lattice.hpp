@@ -210,15 +210,19 @@ class Lattice
         /// Static reference: du/dt.Pi_A.u, Pi_A = (Pi - Pi^T)/2, power of the non-conservative part of the force -Pi u
         /// (not zero only with g_s, Pi = s/N Tr[g_b chi0 g_s]); 0 with the dynamic reference
         double antisymmetric_power(const Coordinates& x__) const;
-        /// Force on each mode at q = 0 (Ha/bohr) with g_b, from the R components of rho__ and of the reference
-        /// reference__ (rho0, or rho_BO for the force used in the dynamics):
-        /// @f$ F_\mu = s\sum_{\mathbf R}\sum_{mn} g_{\mu,mn}(\mathbf R)\,(\rho-\rho_{\rm ref})_{mn}(\mathbf R)^* @f$
-        std::vector<double> force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
-        /// The same force computed directly in k, @f$ F_\mu = \frac{s}{N}\sum_{\mathbf k}\mathrm{Tr}[g_\mu(\mathbf k)(\rho-\rho_{\rm ref})(\mathbf k)] @f$,
+        /// Force on the lattice, F(iq, mu) (Ha/bohr), for the q points of the grid
+        using Force = mdarray<std::complex<double>, 2>;
+        /// Force on each mode and q (Ha/bohr) with g_b, from the R components of rho__ and of the reference
+        /// reference__ (rho0, or rho_BO for the force used in the dynamics), for the q points of rho__:
+        /// @f$ F_\mu(q) = s\sum_{\mathbf R}\sum_{mn} g_{\mu,mn}(\mathbf R;q)^*\,(\rho-\rho_{\rm ref})_{mn}(\mathbf R;q) @f$ (real at q = 0)
+        Force force(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
+        /// The same force computed directly in k, @f$ F_\mu(q) = \frac{s}{N}\sum_{\mathbf k}\mathrm{Tr}[g_\mu(\mathbf k,q)^\dagger(\rho-\rho_{\rm ref})(\mathbf k,q)] @f$,
         /// from the k components of rho__ and reference__: check of the R formula of force() (Force_check.txt)
-        std::vector<double> force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
-        /// Time derivative of the coordinates for the force F__
-        void derivative(Coordinates& dx__, const Coordinates& x__, const std::vector<double>& F__) const;
+        Force force_k(const Operator<std::complex<double>>& rho__, const Operator<std::complex<double>>& reference__) const;
+        /// Real force at q = 0, F_mu(0)
+        static std::vector<double> force_gamma(const Force& F__);
+        /// Time derivative of the coordinates for the force F__ (all q)
+        void derivative(Coordinates& dx__, const Coordinates& x__, const Force& F__) const;
         /// Kinetic and potential energy of the lattice per unit cell (Ha)
         double energy(const Coordinates& x__) const;
         /// Coordinates, force F__ (the one of force()) and energy of each normal mode of the force constants of ph.x
