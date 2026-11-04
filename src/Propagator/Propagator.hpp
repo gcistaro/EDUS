@@ -56,6 +56,13 @@ class Propagator : public CommutatorEquation
         /// H and rho at the local k points and at the ones received from other ranks (halo_k_), nq > 1
         BlockMatrix<std::complex<double>> H_halo_;
         BlockMatrix<std::complex<double>> rho_halo_;
+        /// External potential V0 f(t) cos(q0.r), added to the q = +-q0 slices of H
+        electron::LocalPotential local_potential_;
+        /// local index of R = 0 in the R grid of H, -1 if it is on another rank
+        int iR0_local_ = -1;
+        /// q indices where H(k,q) can be != 0, used by the general commutator: {0, +q0, -q0} with the local
+        /// potential and without mean field, empty (all q) otherwise
+        std::vector<int> active_q_;
         /// equilibrium density matrix with the Peierls phase (nq = 1), used for the decay when nq > 1
         Operator<std::complex<double>> dm0_peierls_;
         /// Same as Rgrid_gamma_ (local part, cartesian), in a contiguous array for the gpu

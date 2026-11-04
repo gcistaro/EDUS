@@ -568,6 +568,34 @@ class config_t
         /* the accessors of phonons_t that change the dictionary are used only on a non-const config_t */
         return phonons_t(const_cast<nlohmann::json&>(dict_.at("/phonons"_json_pointer)));
     }
+    /// External local potential at finite momentum
+    class local_potential_t {
+    private:
+        nlohmann::json& dict_;
+
+    public:
+        local_potential_t(nlohmann::json& dict__)
+            : dict_(dict__)
+        {
+        }
+        bool enabled() const { return dict_.at("enabled").get<bool>(); }
+        std::array<double, 3> q() const { return dict_.at("q").get<std::array<double, 3>>(); }
+        double amplitude() const { return dict_.at("amplitude").get<double>(); }
+        void amplitude(double amplitude__) { dict_["amplitude"] = amplitude__; }
+        std::string amplitude_units() const { return dict_.at("amplitude_units").get<std::string>(); }
+        void amplitude_units(std::string units__) { dict_["amplitude_units"] = units__; }
+        double t0() const { return dict_.at("t0").get<double>(); }
+        void t0(double t0__) { dict_["t0"] = t0__; }
+        double sigma() const { return dict_.at("sigma").get<double>(); }
+        void sigma(double sigma__) { dict_["sigma"] = sigma__; }
+        std::string time_units() const { return dict_.at("time_units").get<std::string>(); }
+        void time_units(std::string units__) { dict_["time_units"] = units__; }
+    };
+    local_potential_t local_potential() const
+    {
+        /* the accessors of local_potential_t that change the dictionary are used only on a non-const config_t */
+        return local_potential_t(const_cast<nlohmann::json&>(dict_.at("/local_potential"_json_pointer)));
+    }
 private:
 protected:
     nlohmann::json dict_;

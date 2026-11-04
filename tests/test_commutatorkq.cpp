@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <complex>
 #include <random>
 #include <vector>
@@ -198,4 +199,39 @@ TEST(CommutatorKQ, DistributedWithHaloK) {
                     EXPECT_NEAR(std::abs(out_g(ik, iq, n, m) - ref_g(ik + offset, iq, n, m)), 0., 1e-13);
                     EXPECT_NEAR(std::abs(out_kq(ik, iq, n, m) - ref_kq(ik + offset, iq, n, m)), 0., 1e-13);
                 }
+}
+
+/* A != 0 only at some q (e.g. 0 and +-q0 for H0 + local potential): the sum restricted to them gives the same */
+TEST(CommutatorKQ, GeneralWithActiveQ) {
+    set_basis();
+    std::array<int,3> ksize = {6, 6, 1};
+    std::array<int,3> qsize = {3, 2, 1};
+    GridStructure grids(ksize, qsize);
+    const int nk = grids.kgrid()->get_TotalSize();
+    const int nq = grids.qgrid()->get_TotalSize();
+    const int nb = 2;
+    auto& ikq = grids.ikq();
+    auto& iqmp = grids.iqmp();
+
+    BlockMatrix<cd> A(k, nk, nb, nb, 0, nq), B(k, nk, nb, nb, 0, nq);
+    BlockMatrix<cd> out1(k, nk, nb, nb, 0, nq), out2(k, nk, nb, nb, 0, nq);
+    std::mt19937 gen(5);
+    fill_random(A, gen);
+    fill_random(B, gen);
+    const std::vector<int> active = {0, 1, 4};
+    for (int ik = 0; ik < nk; ++ik)
+        for (int iq = 0; iq < nq; ++iq)
+            if (std::find(active.begin(), active.end(), iq) == active.end())
+                for (int n = 0; n < nb; ++n)
+                    for (int m = 0; m < nb; ++m)
+                        A(ik, iq, n, m) = 0.;
+    out1.fill(0.);
+    out2.fill(0.);
+    commutator_kq_general(out1, -im, A, B, ikq, iqmp);
+    commutator_kq_general(out2, -im, A, B, ikq, iqmp, nullptr, 0, &active);
+    for (int ik = 0; ik < nk; ++ik)
+        for (int iq = 0; iq < nq; ++iq)
+            for (int n = 0; n < nb; ++n)
+                for (int m = 0; m < nb; ++m)
+                    EXPECT_NEAR(std::abs(out1(ik, iq, n, m) - out2(ik, iq, n, m)), 0., 1e-13);
 }

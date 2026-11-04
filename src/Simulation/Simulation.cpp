@@ -57,9 +57,10 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         output::print("It is recommended to restart the simulation with the file wannier_tb.dat that I will print");
         electrons_.print_wannier("wannier_tb.dat", gridstructure_, decomposition_.kpool_comm());
     }
-    /* with the mean field and nq > 1 the self energy has q components: H_ gets them too */
+    /* with the mean field or the local potential and nq > 1 the Hamiltonian has q components: H_ gets them */
     auto meanfield_parameters = electron::MeanFieldParametersFactory::create( ctx_->cfg() );
-    const bool hamiltonian_with_q = ( gridstructure_.qgrid()->get_TotalSize() > 1 && meanfield_parameters.enabled );
+    const bool hamiltonian_with_q = ( gridstructure_.qgrid()->get_TotalSize() > 1 &&
+                                      ( meanfield_parameters.enabled || ctx_->cfg().local_potential().enabled() ) );
     electrons_state_.initialize(gridstructure_, num_bands_, decomposition_.mpindex(), decomposition_.mpindex_q(),
                                 hamiltonian_with_q);
 
@@ -149,6 +150,14 @@ void Simulation::convert_input_au()
     ctx_->cfg().opengap(Convert(ctx_->cfg().opengap(), unit(ctx_->cfg().opengap_units()),
         AuEnergy));
     ctx_->cfg().opengap_units("auenergy");
+
+    /* local potential: amplitude, center and width of the envelope in a.u. */
+    auto local_potential = ctx_->cfg().local_potential();
+    local_potential.amplitude(Convert(local_potential.amplitude(), unit(local_potential.amplitude_units()), AuEnergy));
+    local_potential.amplitude_units("auenergy");
+    local_potential.t0(Convert(local_potential.t0(), unit(local_potential.time_units()), AuTime));
+    local_potential.sigma(Convert(local_potential.sigma(), unit(local_potential.time_units()), AuTime));
+    local_potential.time_units("autime");
 
     /* phonons: damping time and initial displacement in a.u. */
     auto phonons = ctx_->cfg().phonons();

@@ -313,15 +313,26 @@ void commutator_k(BlockMatrix<T_>& output__,
 /// output__ has the local k points of this rank (global index ik + ik_offset__). A__ and B__ contain the local k
 /// points and the ones of other ranks needed here (halo buffer of parallel::HaloK): the global k is at the block
 /// (*kpos__)[ik_glob]. With kpos__ = nullptr (one rank) A__ and B__ have all the k points in the global order.
+/// active_q__: the q indices a where A(k,a) can be != 0 (e.g. 0 and +-q0 for H0 + local potential); only those
+/// terms are computed. Writing the sum with a = q - p in the first term and a = p in the second:
+///     output(k,q) += s * sum_a [ A(k+q-a, a) B(k, q-a) - B(k+a, q-a) A(k, a) ]
+/// With active_q__ = nullptr, a runs over the whole q grid.
 template <typename T_, typename U>
 void commutator_kq_general(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& A__,
                            const BlockMatrix<T_>& B__, const mdarray<int,2>& ikq__, const mdarray<int,2>& iqmp__,
-                           const std::vector<int>* kpos__ = nullptr, const int ik_offset__ = 0)
+                           const std::vector<int>* kpos__ = nullptr, const int ik_offset__ = 0,
+                           const std::vector<int>* active_q__ = nullptr)
 {
     const int nk = output__.get_nk();
     const int nq = output__.get_nq();
     assert( A__.get_nk() == B__.get_nk() && A__.get_nq() == nq && B__.get_nq() == nq );
     auto pos = [&](int ik_glob) { return kpos__ ? (*kpos__)[ik_glob] : ik_glob; };
+    std::vector<int> all_q;
+    if( !active_q__ ) {
+        all_q.resize(nq);
+        for (int iq = 0; iq < nq; ++iq) all_q[iq] = iq;
+    }
+    const std::vector<int>& active = active_q__ ? *active_q__ : all_q;
     const T_ s = scalar__;
     const T_ one = 1.;
     /* each (ik, iq) writes only its own block: no race */
@@ -329,13 +340,15 @@ void commutator_kq_general(BlockMatrix<T_>& output__, U scalar__, const BlockMat
     for (int ik = 0; ik < nk; ++ik) {
         for (int iq = 0; iq < nq; ++iq) {
             const int iblock = ik*nq + iq;
-            const int ik_h = pos(ik + ik_offset__);
-            for (int ip = 0; ip < nq; ++ip) {
-                const int ikp_h = pos(ikq__(ik + ik_offset__, ip));
-                const int iqp = iqmp__(iq, ip);
-                assert( ik_h >= 0 && ikp_h >= 0 );
-                Matrix_gemm(output__[iblock],  s, A__[ikp_h*nq + iqp], B__[ik_h*nq + ip], one);
-                Matrix_gemm(output__[iblock], -s, B__[ikp_h*nq + iqp], A__[ik_h*nq + ip], one);
+            const int ik_glob = ik + ik_offset__;
+            const int ik_h = pos(ik_glob);
+            for (const int ia : active) {
+                const int iqa = iqmp__(iq, ia);                 // q - a
+                const int ik1_h = pos(ikq__(ik_glob, iqa));     // k + q - a
+                const int ik2_h = pos(ikq__(ik_glob, ia));      // k + a
+                assert( ik_h >= 0 && ik1_h >= 0 && ik2_h >= 0 );
+                Matrix_gemm(output__[iblock],  s, A__[ik1_h*nq + ia], B__[ik_h*nq + iqa], one);
+                Matrix_gemm(output__[iblock], -s, B__[ik2_h*nq + iqa], A__[ik_h*nq + ia], one);
             }
         }
     }

@@ -410,6 +410,67 @@
                 }
             }
         },
+        "local_potential": {
+            "type": "object",
+            "title": "External local potential at finite momentum, V(r,t) = amplitude*f(t)*cos(q.r) with f(t) = exp(-(t-t0)^2/(2 sigma^2)). In the Wannier basis it is diagonal: V_n(R) = amplitude*f(t)*cos(q.(R + tau_n)), with tau_n the Wannier centers. It needs a q grid that contains +q and -q",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "title": "If true, the local potential is added to the Hamiltonian"
+                },
+                "q": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "title": "Wave vector q of the potential, crystal coordinates of the reciprocal lattice. Must be a point of the q grid, different from 0"
+                },
+                "amplitude": {
+                    "type": "number",
+                    "default": 0.0,
+                    "title": "Amplitude of the potential"
+                },
+                "amplitude_units": {
+                    "type": "string",
+                    "default": "electronvolt",
+                    "enum": [
+                        "electronvolt",
+                        "joule",
+                        "Rydberg",
+                        "auenergy"
+                    ],
+                    "title": "Units of amplitude"
+                },
+                "t0": {
+                    "type": "number",
+                    "default": 0.0,
+                    "title": "Center of the Gaussian envelope f(t)"
+                },
+                "sigma": {
+                    "type": "number",
+                    "default": 1.0,
+                    "title": "Width of the Gaussian envelope f(t)"
+                },
+                "time_units": {
+                    "type": "string",
+                    "default": "femtoseconds",
+                    "enum": [
+                        "femtoseconds",
+                        "fs",
+                        "autime"
+                    ],
+                    "title": "Units of t0 and sigma"
+                }
+            }
+        },
         "kpath": {
             "type":  "array",
             "title": "vertex of a path in k space where we want to print the band structure",

@@ -34,6 +34,22 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         throw std::runtime_error("Propagator: with the mean field and nq > 1 the Hamiltonian must have the q components\n");
     }
 
+    /* external local potential at q0: it lives in the q = +-q0 slices of H, so it needs nq > 1 and H with q */
+    local_potential_.initialize(parameters_.local_potential, gridstructure__.qgrid(), system__.wannier_centers());
+    if( local_potential_.enabled() ) {
+        if( state__.H().get_nq() != gridstructure__.qgrid()->get_TotalSize() || gridstructure__.qgrid()->get_TotalSize() == 1 ) {
+            throw std::runtime_error("Propagator: the local potential needs nq > 1 and the Hamiltonian with the q components\n");
+        }
+        /* V is at R = 0 only, on the rank that has it */
+        const int iR0_global = gridstructure__.Rgrid()->find(Coordinate(0,0,0));
+        const auto& mpindex = state__.H().get_mpindex();
+        iR0_local_ = mpindex.is_local(iR0_global) ? mpindex.glob1D_to_loc1D(iR0_global) : -1;
+        /* without mean field H(k,q) != 0 only at q = 0 (H0 + E.r) and +-q0 (V): the commutator skips the rest */
+        if( !meanfield__.parameters().enabled ) {
+            active_q_ = local_potential_.active_q();
+        }
+    }
+
     /* R vectors in a contiguous array, used on gpu for the Peierls phase */
     auto nR_local = Rgrid_gamma_->mpindex.get_nlocal();
     bare_Rgrid_gamma_.initialize({nR_local, 3});
@@ -298,9 +314,10 @@ void Propagator::derivative_electrons(Operator<std::complex<double>>& Output__, 
         /* k + q and k + p can be on other ranks: H (and rho) at the local k and at the k received from them */
         halo_k_.exchange(H_halo_, H);
         if( H.get_nq() > 1 ) {
-            /* H with q components (mean field): Output(k,q) += -i*sum_p ( H(k+p,q-p) rho(k,p) - rho(k+p,q-p) H(k,p) ) */
+            /* H with q components (mean field, local potential): Output(k,q) += -i*sum_p ( H(k+p,q-p) rho(k,p) - rho(k+p,q-p) H(k,p) ) */
             halo_k_.exchange(rho_halo_, Input);
-            commutator_kq_general(Output, -im, H_halo_, rho_halo_, *ikq_, *iqmp_, &halo_k_.position(), halo_k_.offset());
+            commutator_kq_general(Output, -im, H_halo_, rho_halo_, *ikq_, *iqmp_, &halo_k_.position(), halo_k_.offset(),
+                                  active_q_.empty() ? nullptr : &active_q_);
         }
         else {
             /* Output(k,q) += -i*( H(k+q) rho(k,q) - rho(k,q) H(k) ) */
@@ -358,6 +375,12 @@ void Propagator::build_hamiltonian(const double& time__, const Operator<std::com
 
     /* Coulomb interaction H_ += \Sigma^H[\rho] + \Sigma^{SEX}[\rho] */
     H_.go_to_R();
+
+    /* external local potential H_(R = 0; +-q0) += V0 f(t)/2 e^{+-iq0.tau_n}. It is an external field like the
+       laser: not felt by rho_BO. At R = 0 the Peierls phase is 1, so it does not matter that it is added before */
+    if( with_field__ ) {
+        local_potential_.add(H_.get_Operator(R), iR0_local_, time__);
+    }
 
     if(peierls) {
         copy(DM__.get_Operator(R), aux_DM_.get_Operator(R), processor_);

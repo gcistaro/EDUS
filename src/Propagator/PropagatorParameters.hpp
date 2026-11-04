@@ -5,6 +5,7 @@
 #include "Constants.hpp"
 #include "DESolver/DESolverParameters.hpp"
 #include "InputVariables/config.hpp"
+#include "LocalPotential/LocalPotential.hpp"
 
 struct PropagatorParameters
 {
@@ -16,6 +17,8 @@ struct PropagatorParameters
     double decay = 0.;
     /// Space where the gradient in k is evaluated
     Space gradient_space = R;
+    /// External local potential at finite momentum (needs nq > 1)
+    electron::LocalPotentialParameters local_potential;
 };
 
 class PropagatorParametersFactory
@@ -32,6 +35,7 @@ public:
         p.peierls = cfg.peierls();
         p.decay = cfg.decay();
         p.gradient_space = (cfg.gradient_space() == "R" ? Space::R : Space::k);
+        p.local_potential = electron::LocalPotentialParametersFactory::create(cfg);
         /* with the Peierls phase the propagation corresponds to the gradient in R, while the velocity
            would use the finite differences in k: the current would not be the one of the dynamics */
         if( p.peierls && p.gradient_space == Space::k ) {
