@@ -156,6 +156,8 @@ class Propagator : public CommutatorEquation
         void set_step(const long istep__) { desolver_ehrenfest_.set_step(istep__); desolver_.set_step(istep__); }
         /// Lattice coupled to the electrons, nullptr without phonons
         const phonon::Lattice* lattice() const { return lattice_; }
+        const electron::LocalPotential& local_potential() const { return local_potential_; }
+        const parallel::HaloK& halo_k() const { return halo_k_; }
         Processor processor() const { return processor_; }
 };
 

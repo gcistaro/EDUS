@@ -32,7 +32,31 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     }
 
     auto& DMk = state_->DensityMatrix().get_Operator_k();
-    temp_.initialize(k, DMk.get_nblocks(), DMk.get_nrows(), DMk.get_ncols());
+    temp_.initialize(k, DMk.get_nk(), DMk.get_nrows(), DMk.get_ncols());
+    if( nq_ > 1 ) {
+        rho_q0_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "rho_q0");
+        /* velocity with q: workspaces with the q grid of the density matrix, r at the halo k points (fixed) */
+        const int nb = DMk.get_nrows();
+        auto& halo = propagator_->halo_k();
+        h_q_.initialize_fft(state_->aux_DM(), "H_velocity");
+        for( int ix : {0, 1, 2} ) {
+            v_q_[ix].initialize_fft(state_->aux_DM(), "v_q");
+            v_q_halo_[ix] = BlockMatrix<std::complex<double>>(Space::k, halo.n_halo(), nb, nb, 0, nq_);
+            r_halo_[ix] = BlockMatrix<std::complex<double>>(Space::k, halo.n_halo(), nb, nb);
+            halo.exchange(r_halo_[ix], system_->r()[ix].get_Operator(Space::k));
+        }
+        ikq_ = &gridstructure__.ikq();
+        iqmp_ = &gridstructure__.iqmp();
+        auto& qgrid = *gridstructure__.qgrid();
+        phase_tau_.initialize({nq_, nb});
+        for( int iq = 0; iq < nq_; ++iq ) {
+            auto q = qgrid[iq].get("Cartesian");
+            for( int n = 0; n < nb; ++n ) {
+                auto tau = system_->wannier_centers()[n].get("Cartesian");
+                phase_tau_(iq, n) = std::exp(-im*(q[0]*tau[0] + q[1]*tau[1] + q[2]*tau[2]));
+            }
+        }
+    }
     /* workspace for the energy balance */
     sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "Sigma_energy");
     grad_sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "grad_Sigma_energy");
@@ -51,7 +75,8 @@ void OutputManager::initialize(const OutputParameters& parameters__,
 
     /* print equilibrium density matrix in real space (one file per rank) */
     if( parameters_.print_DM_R ) {
-        auto& aux = state_->aux_DM();
+        /* with nq > 1 aux_DM has the q components: DM0 (q = 0) goes in rho_q0_, which has nq = 1 */
+        auto& aux = ( nq_ > 1 ? rho_q0_ : state_->aux_DM() );
         auto& DM0R = system_->DM0().get_Operator(R);
         std::copy(DM0R.begin(), DM0R.end(), aux.get_Operator(R).begin());
         aux.lock_space(R);
@@ -79,7 +104,23 @@ void OutputManager::initialize(const OutputParameters& parameters__,
             }
             os_density_q_ << "# columns: time, then for iq = 0..nq-1 and band m: Re n_m(q), Im n_m(q)\n";
         }
-        os_energy_.open(path("Energy.txt"));
+        if( nq_ > 1 ) {
+            os_current_q_.open(path("CurrentQ.txt"));
+            os_current_q_ << "# j(q,t) = 1/(N Omega) <1/2 {v, e^{-iq.r}}>, v = i[H0 + Sigma + V, r], e^{-iq.r} = diag(e^{-iq.(R+tau_n)}) (corrente_q_finito.pdf)\n"
+                          << "# q = 0 is Velocity.txt. Continuity: dn(q)/dt = -i Omega q.j(q) (1 + O(q^2)), n(q) = sum_m e^{-iq.tau_m} n_m(q) of DensityQ.txt, Omega = cell volume\n"
+                          << "# q points: the same of DensityQ.txt\n"
+                          << "# columns: time, then for iq = 0..nq-1 and direction x, y, z: Re j(q), Im j(q)\n";
+        }
+        if( propagator_->local_potential().enabled() ) {
+            auto& lp = propagator_->local_potential();
+            os_local_potential_.open(path("LocalPotential.txt"));
+            os_local_potential_ << "# External local potential V(r,t) = V0 f(t) cos(q0.r), f(t) = exp(-(t-t0)^2/(2 sigma^2))\n"
+                                << "# q0 = q point " << lp.iq_plus() << " of DensityQ.txt (-q0: " << lp.iq_minus() << ")\n"
+                                << "# columns: time (a.u.), V0 f(t) (Hartree)\n";
+        }
+        if( nq_ == 1 ) {
+            os_energy_.open(path("Energy.txt"));
+        }
         auto* lattice = propagator_->lattice();
         os_energy_ << "# Energy balance of the electrons, Hartree per unit cell (one spin channel)\n"
                    << "# E_band = Tr[H0 (rho-rho0)], E_MF = 1/2 Tr[Sigma[rho-rho0] (rho-rho0)], E = E_band + E_MF"
@@ -182,9 +223,18 @@ void OutputManager::write(const double& time__)
             os_laser_ << (*lasers_)(time__).get("Cartesian");
             os_vectorpot_ << lasers_->VectorPotential(time__).get("Cartesian");
         }
-        /* with nq > 1 populations, velocity and energy are not generalized yet: only n(q,t) */
+        if( is_writer_ && propagator_->local_potential().enabled() ) {
+            os_local_potential_ << std::setw(20) << std::setprecision(10) << time__ << " "
+                                << std::setw(24) << std::setprecision(14) << propagator_->local_potential().amplitude(time__)
+                                << std::endl;
+        }
+        /* with nq > 1: n(q,t), populations and velocity of the q = 0 slice; energy not generalized yet */
         if( nq_ > 1 ) {
             print_density_q(time__);
+            print_population(time__, BandGauge::bloch);
+            print_population(time__, BandGauge::wannier);
+            print_current_q(time__);
+            print_velocity_energy(time__);
             return;
         }
         print_population(time__, BandGauge::bloch);
@@ -236,6 +286,33 @@ void OutputManager::copy_DM_to_aux(const double& time__)
     }
 }
 
+/// @brief With nq = 1 the density matrix without the Peierls phase (aux_DM). With nq > 1 its q = 0 slice in rho_q0_:
+/// rho_nm(k, q=0) = <c^dag_{m,k} c_{n,k}> is the density matrix of the occupations (populations, velocity), while
+/// q != 0 are coherences between k and k+q (density modulations, DensityQ.txt)
+Operator<std::complex<double>>& OutputManager::density_matrix_q0(const double& time__)
+{
+    copy_DM_to_aux(time__);
+    auto& aux = state_->aux_DM();
+    if( nq_ == 1 ) {
+        return aux;
+    }
+    aux.go_to_k();
+    auto& rho = aux.get_Operator(Space::k);
+    auto& rho0 = rho_q0_.get_Operator(Space::k);
+    const int iq0 = 0; // q = 0 is the first point of the q grid
+    #pragma omp parallel for collapse(3)
+    for( int ik = 0; ik < rho.get_nk(); ++ik ) {
+        for( int n = 0; n < rho.get_nrows(); ++n ) {
+            for( int m = 0; m < rho.get_ncols(); ++m ) {
+                rho0(ik, n, m) = rho(ik, iq0, n, m);
+            }
+        }
+    }
+    rho_q0_.lock_space(Space::k);
+    rho_q0_.lock_gauge(aux.get_bandgauge());
+    return rho_q0_;
+}
+
 /// @brief Prints the population for each band (bloch gauge) or orbital (wannier gauge):
 /// @f[
 /// P_n(t) = \frac{1}{N}\sum_{\textbf{k}} \rho_{nn}(\textbf{k}) = \rho_{nn}(\textbf{R}=0)
@@ -243,8 +320,7 @@ void OutputManager::copy_DM_to_aux(const double& time__)
 /// For filled bands in the bloch gauge we print the population of holes, @f$ 1-P_n(t) @f$
 void OutputManager::print_population(const double& time__, const BandGauge& bandgauge__)
 {
-    copy_DM_to_aux(time__);
-    auto& aux = state_->aux_DM();
+    auto& aux = density_matrix_q0(time__);
     aux.go_to(bandgauge__);
     aux.go_to_R();
 
@@ -312,6 +388,146 @@ void OutputManager::print_density_q(const double& time__)
         os_density_q_ << std::endl;
     }
     aux.set_processor(propagator_->processor());
+}
+
+/// @brief nq > 1: velocity with the q components and current at q (corrente_q_finito.pdf).
+/// H(q) = H0 + Sigma[rho - rho0](q) + V(+-q0), without the laser (E.r commutes with r), in the length gauge.
+///     v(k,q) = ( grad_k H(k,q) + i[H(k,q) r(k) - r(k+q) H(k,q)] )/Omega
+///     j(q) = 1/(2N) sum_k sum_p Tr[ ( v(k+p-q, q-p) D_q + D_q v(k+p, q-p) ) rho(k,p) ],   D_q = diag(e^{-iq.tau_n})
+/// written in CurrentQ.txt (per unit volume, like Velocity.txt). v at k+p and k+p-q comes from the other ranks (halo).
+/// Also computes the terms p != 0 of the macroscopic velocity, sum_k sum_{p != 0} Tr[v(k+p,-p) rho(k,p)], added to
+/// Velocity.txt by print_velocity_energy (the term p = 0 is computed there, as with nq = 1).
+void OutputManager::print_current_q(const double& time__)
+{
+    PROFILE("OutputManager::print_current_q");
+    /* rho without the Peierls phase, aligned in R (self energy) and k */
+    copy_DM_to_aux(time__);
+    auto& aux = state_->aux_DM();
+    aux.go_to_R();
+    aux.go_to_k();
+    auto& rho = aux.get_Operator(Space::k);
+
+    /* H(R;q) = H0 (q = 0) + Sigma(q) + V(+-q0) */
+    auto& HR = h_q_.get_Operator(R);
+    auto& H0R = system_->H0().get_Operator(R);
+    HR.fill(0.);
+    const int iq0 = 0;
+    const int nb = HR.get_nrows();
+    #pragma omp parallel for collapse(3)
+    for( int iR = 0; iR < H0R.get_nk(); ++iR ) {
+        for( int n = 0; n < nb; ++n ) {
+            for( int m = 0; m < nb; ++m ) {
+                HR(iR, iq0, n, m) = H0R(iR, 0, n, m);
+            }
+        }
+    }
+    h_q_.lock_space(R);
+    if( meanfield_->parameters().enabled ) {
+        meanfield_->self_energy(h_q_, aux, system_->DM0());
+    }
+    propagator_->local_potential().add(HR, has_origin_ ? index_origin_local_ : -1, time__);
+
+    /* grad_k H(k,q): i R H(R;q) for every q */
+    std::array<Coordinate, 3> direction;
+    direction[0].initialize(1, 0, 0);
+    direction[1].initialize(0, 1, 0);
+    direction[2].initialize(0, 0, 1);
+    for( int ix : {0, 1, 2} ) {
+        v_q_[ix].get_Operator(R).fill(0.);
+        propagator_->kgradient().Calculate(1. + 0. * im, v_q_[ix].get_Operator(R), HR, direction[ix], true);
+        v_q_[ix].lock_space(R);
+        v_q_[ix].go_to_k();
+    }
+    h_q_.go_to_k();
+    auto& Hk = h_q_.get_Operator(Space::k);
+
+    /* + i[H(k,q) r(k) - r(k+q) H(k,q)], then / Omega; v at the halo k points */
+    auto& halo = propagator_->halo_k();
+    auto& pos = halo.position();
+    const int offset = halo.offset();
+    const int nk = Hk.get_nk();
+    const double volume = system_->cell_volume();
+    const std::complex<double> one = 1.;
+    for( int ix : {0, 1, 2} ) {
+        auto& v = v_q_[ix].get_Operator(Space::k);
+        auto& r = system_->r()[ix].get_Operator(Space::k);
+        #pragma omp parallel for collapse(2)
+        for( int ik = 0; ik < nk; ++ik ) {
+            for( int iq = 0; iq < nq_; ++iq ) {
+                const int iblock = ik*nq_ + iq;
+                const int ikq_h = pos[(*ikq_)(ik + offset, iq)];
+                Matrix_gemm(v[iblock],  im, Hk[iblock], r[ik], one);
+                Matrix_gemm(v[iblock], -im, r_halo_[ix][ikq_h], Hk[iblock], one);
+                for( int n = 0; n < nb; ++n ) {
+                    for( int m = 0; m < nb; ++m ) {
+                        v(ik, iq, n, m) /= volume;
+                    }
+                }
+            }
+        }
+        halo.exchange(v_q_halo_[ix], v);
+    }
+
+    /* local sums: j(q) (index (iq*3 + ix)), and the terms p != 0 of the velocity */
+    std::vector<std::complex<double>> local(3*nq_ + 3, 0.);
+    for( int ix : {0, 1, 2} ) {
+        auto& vh = v_q_halo_[ix];
+        for( int iq = 0; iq < nq_; ++iq ) {
+            double re = 0., im_ = 0.;
+            #pragma omp parallel for collapse(2) reduction(+:re,im_)
+            for( int ik = 0; ik < nk; ++ik ) {
+                for( int ip = 0; ip < nq_; ++ip ) {
+                    const int ik_glob = ik + offset;
+                    const int iqp = (*iqmp_)(iq, ip);                          // q - p
+                    const int i1 = pos[(*ikq_)(ik_glob, (*iqmp_)(ip, iq))];     // k + p - q
+                    const int i2 = pos[(*ikq_)(ik_glob, ip)];                   // k + p
+                    std::complex<double> sum = 0.;
+                    for( int n = 0; n < nb; ++n ) {
+                        for( int m = 0; m < nb; ++m ) {
+                            sum += ( vh(i1, iqp, n, m)*phase_tau_(iq, m) + phase_tau_(iq, n)*vh(i2, iqp, n, m) )
+                                   * rho(ik, ip, m, n);
+                        }
+                    }
+                    re += 0.5*sum.real();
+                    im_ += 0.5*sum.imag();
+                }
+            }
+            local[iq*3 + ix] = std::complex<double>(re, im_);
+        }
+        /* velocity: sum_{p != 0} Tr[v(k+p, -p) rho(k,p)] */
+        double re = 0., im_ = 0.;
+        #pragma omp parallel for collapse(2) reduction(+:re,im_)
+        for( int ik = 0; ik < nk; ++ik ) {
+            for( int ip = 1; ip < nq_; ++ip ) {
+                const int i2 = pos[(*ikq_)(ik + offset, ip)];
+                const int imp = (*iqmp_)(iq0, ip);                              // -p
+                std::complex<double> sum = 0.;
+                for( int n = 0; n < nb; ++n ) {
+                    for( int m = 0; m < nb; ++m ) {
+                        sum += vh(i2, imp, n, m)*rho(ik, ip, m, n);
+                    }
+                }
+                re += sum.real();
+                im_ += sum.imag();
+            }
+        }
+        velocity_q_terms_[ix] = std::complex<double>(re, im_);
+    }
+#ifdef EDUS_MPI
+    auto& comm = decomposition_->kpool_comm();
+    MPI_Reduce( comm.rank() == 0 ? MPI_IN_PLACE : local.data(), local.data(),
+                int(local.size()), MPI_CXX_DOUBLE_COMPLEX, MPI_SUM, 0, comm.communicator() );
+#endif
+    aux.set_processor(propagator_->processor());
+    if( is_writer_ ) {
+        const double num_k = rho.get_MeshGrid()->get_TotalSize();
+        os_current_q_ << std::setw(20) << std::setprecision(10) << time__;
+        for( int i = 0; i < 3*nq_; ++i ) {
+            os_current_q_ << " " << std::setw(24) << std::setprecision(14) << local[i].real() / num_k
+                          << " " << std::setw(24) << std::setprecision(14) << local[i].imag() / num_k;
+        }
+        os_current_q_ << std::endl;
+    }
 }
 
 /// @brief Sum over the local k points of Tr[A(k) B(k)]
@@ -390,8 +606,9 @@ void OutputManager::print_velocity_energy(const double& time__)
     PROFILE("OutputManager::print_velocity_energy");
     /* with the Peierls phase, copy_DM_to_aux gives back the density matrix of the length gauge: the Peierls
        propagation is the same equation with the gradient in R (i R.E), so velocity and balance are the same */
-    copy_DM_to_aux(time__);
-    auto& aux = state_->aux_DM();
+    /* with nq > 1 the q = 0 slice: Tr[v rho] = sum_k sum_p Tr[v(k+p,-p) rho(k,p)], and v has only q = 0 if H has
+       only q = 0 (H0 + E.r, Sigma at q = 0). The terms p != 0 of Sigma(q), V(+-q0) (second order) are not included yet */
+    auto& aux = density_matrix_q0(time__);
     aux.go_to_k();
     auto& rho = aux.get_Operator(Space::k);
     auto& rho0 = system_->DM0().get_Operator(Space::k);
@@ -411,6 +628,12 @@ void OutputManager::print_velocity_energy(const double& time__)
         }
     }
     local[6] = trace_product_difference(system_->H0().get_Operator(Space::k), rho, rho0);
+    /* nq > 1: terms p != 0 of the velocity (print_current_q), already divided by the cell volume like local[0-2] */
+    if( nq_ > 1 ) {
+        for( int ix : {0, 1, 2} ) {
+            local[ix] += velocity_q_terms_[ix];
+        }
+    }
 
     /* forces on the lattice (with g_b): of rho - rho0 (force_full), of rho - rho_BO (force_excited, the one of the
        dynamics) and of rho_BO - rho0 (dynamic reference) */
@@ -608,7 +831,10 @@ void OutputManager::print_velocity_energy(const double& time__)
         os_velocity_sigma_ << std::endl;
     }
 
-    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 */
+    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 (not yet with nq > 1) */
+    if( nq_ > 1 ) {
+        return;
+    }
     auto field = (*lasers_)(time__).get("Cartesian");
     double power = 0.;
     for (auto ix : { 0, 1, 2 }) {

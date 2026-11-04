@@ -37,8 +37,28 @@ class OutputManager
         bool has_origin_ = false;
         /// Local index of R=0, if has_origin_
         int index_origin_local_ = -1;
-        /// Number of q points of the density matrix (nq > 1: only DensityQ.txt, Time.txt and the laser are written)
+        /// Number of q points of the density matrix. With nq > 1: DensityQ.txt, populations of the q = 0 slice,
+        /// Time.txt, the laser and LocalPotential.txt; velocity and energy not yet
         int nq_ = 1;
+        /// q = 0 slice of the density matrix (nq = 1 operator), for the populations when nq > 1
+        Operator<std::complex<double>> rho_q0_;
+        /// nq > 1, velocity with the q components (corrente_q_finito.pdf): H(q) = H0 + Sigma(q) + V(+-q0) without the
+        /// laser, v(k,q) = (grad_k H(k,q) + i[H(k,q) r(k) - r(k+q) H(k,q)])/Omega, its value at the k points of other
+        /// ranks (halo) and r(k) at the halo k points (fixed, exchanged once)
+        Operator<std::complex<double>> h_q_;
+        std::array<Operator<std::complex<double>>, 3> v_q_;
+        std::array<BlockMatrix<std::complex<double>>, 3> v_q_halo_;
+        std::array<BlockMatrix<std::complex<double>>, 3> r_halo_;
+        const mdarray<int,2>* ikq_ = nullptr;
+        const mdarray<int,2>* iqmp_ = nullptr;
+        /// D_q = diag(e^{-iq.tau_n}), (iq, n)
+        mdarray<std::complex<double>,2> phase_tau_;
+        /// sum over the local k of the terms p != 0 of the velocity, sum_p Tr[v(k+p,-p) rho(k,p)], added in Velocity.txt
+        std::array<std::complex<double>, 3> velocity_q_terms_{};
+        /// j(q,t), written when nq > 1
+        std::ofstream os_current_q_;
+        /// V0 f(t) of the local potential, written when it is enabled
+        std::ofstream os_local_potential_;
         /// n_m(q,t) = rho_mm(R=0; q) in the Wannier gauge, written when nq > 1
         std::ofstream os_density_q_;
         /// Index of the next node in the h5 file
@@ -84,9 +104,13 @@ class OutputManager
         bool is_print_step(const double& time__, const bool& use_sparse__);
         /// Copies the density matrix in aux_DM, removing the Peierls phase if needed
         void copy_DM_to_aux(const double& time__);
+        /// Density matrix of the populations: aux_DM (copy_DM_to_aux) with nq = 1, its q = 0 slice (rho_q0_) with nq > 1
+        Operator<std::complex<double>>& density_matrix_q0(const double& time__);
         void print_population(const double& time__, const BandGauge& bandgauge__);
         /// n_m(q) = rho_mm(R=0; q) (Wannier gauge) in DensityQ.txt, for nq > 1
         void print_density_q(const double& time__);
+        /// nq > 1: builds v(k,q), writes j(q) in CurrentQ.txt and computes the terms p != 0 of the velocity
+        void print_current_q(const double& time__);
         /// Velocity (with the self energy and the lattice) in Velocity.txt, energy balance in Energy.txt and
         /// coordinates, forces and energy of the lattice in Lattice.txt
         void print_velocity_energy(const double& time__);
