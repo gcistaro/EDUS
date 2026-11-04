@@ -23,9 +23,6 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
     Rgrid_gamma_ = gridstructure__.Rgrid_GammaCentered();
     ikq_ = &gridstructure__.ikq();
     iqmp_ = &gridstructure__.iqmp();
-    if( gridstructure__.qgrid()->get_TotalSize() > 1 && mpi::Communicator::world().size() > 1 ) {
-        throw std::runtime_error("Propagator: nq > 1 is implemented only with 1 MPI rank for now\n");
-    }
     if( gridstructure__.qgrid()->get_TotalSize() > 1 && !parameters_.peierls && parameters_.gradient_space != R ) {
         throw std::runtime_error("Propagator: nq > 1 without Peierls requires gradient_space = R\n");
     }
@@ -53,6 +50,15 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         }
         if( processor_ == device ) {
             throw std::runtime_error("Propagator: nq > 1 is not available on gpu\n");
+        }
+        /* the commutator with q needs H (and rho, if H has q components) at k + q, k + p, that can be on other
+           ranks: who sends what is computed here once, the data are exchanged at each call of the derivative */
+        halo_k_.initialize(*ikq_, state__.DensityMatrix().get_mpindex());
+        const int nb = state__.H().get_Operator(Space::k).get_nrows();
+        const int nq_H = state__.H().get_Operator(Space::k).get_nq();
+        H_halo_ = BlockMatrix<std::complex<double>>(Space::k, halo_k_.n_halo(), nb, nb, 0, nq_H);
+        if( nq_H > 1 ) {
+            rho_halo_ = BlockMatrix<std::complex<double>>(Space::k, halo_k_.n_halo(), nb, nb, 0, nq_H);
         }
         /* equilibrium density matrix with the Peierls phase, for the decay (nq = 1, aux_DM_ has nq blocks) */
         if( parameters_.peierls && parameters_.decay > 1.e-07 ) {
@@ -288,13 +294,21 @@ void Propagator::derivative_electrons(Operator<std::complex<double>>& Output__, 
     auto& Input = Input__.get_Operator(propagation_space_);
     auto& H = H_.get_Operator(propagation_space_);
 
-    if( H.get_nq() > 1 ) {
-        /* H with q components (mean field): Output(k,q) += -i*sum_p ( H(k+p,q-p) rho(k,p) - rho(k+p,q-p) H(k,p) ) */
-        commutator_kq_general(Output, -im, H, Input, *ikq_, *iqmp_);
+    if( Input.get_nq() > 1 ) {
+        /* k + q and k + p can be on other ranks: H (and rho) at the local k and at the k received from them */
+        halo_k_.exchange(H_halo_, H);
+        if( H.get_nq() > 1 ) {
+            /* H with q components (mean field): Output(k,q) += -i*sum_p ( H(k+p,q-p) rho(k,p) - rho(k+p,q-p) H(k,p) ) */
+            halo_k_.exchange(rho_halo_, Input);
+            commutator_kq_general(Output, -im, H_halo_, rho_halo_, *ikq_, *iqmp_, &halo_k_.position(), halo_k_.offset());
+        }
+        else {
+            /* Output(k,q) += -i*( H(k+q) rho(k,q) - rho(k,q) H(k) ) */
+            commutator_kq(Output, -im, H_halo_, Input, false, processor_, *ikq_, &halo_k_.position(), halo_k_.offset());
+        }
     }
     else {
-        /* with nq > 1: Output(k,q) += -i*( H(k+q) rho(k,q) - rho(k,q) H(k) ) */
-        commutator(Output, -im, H, Input, false, processor_, ( Input.get_nq() > 1 ? ikq_ : nullptr ));
+        commutator(Output, -im, H, Input, false, processor_);
     }
 
     /* decay towards equilibrium: d(rho)/dt += -(rho - rho0)/decay.

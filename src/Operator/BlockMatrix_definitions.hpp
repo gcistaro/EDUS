@@ -308,16 +308,20 @@ void commutator_k(BlockMatrix<T_>& output__,
 
 /// output(k,q) += s * sum_p [ A(k+p, q-p) B(k,p) - B(k+p, q-p) A(k,p) ]
 /// Commutator of two operators that both have q components: X_nm(k,q) = <n,k+q|X|m,k>, so that
-/// (XY)(k,q) = sum_p X(k+p,q-p) Y(k,p). ikq__(ik, ip) = index of k + q[ip] in the k grid,
-/// iqmp__(iq, ip) = index of q[iq] - q[ip] in the q grid. For now only 1 rank (local index = global index).
+/// (XY)(k,q) = sum_p X(k+p,q-p) Y(k,p). ikq__(ik, ip) = global index of k + q[ip] in the k grid,
+/// iqmp__(iq, ip) = index of q[iq] - q[ip] in the q grid.
+/// output__ has the local k points of this rank (global index ik + ik_offset__). A__ and B__ contain the local k
+/// points and the ones of other ranks needed here (halo buffer of parallel::HaloK): the global k is at the block
+/// (*kpos__)[ik_glob]. With kpos__ = nullptr (one rank) A__ and B__ have all the k points in the global order.
 template <typename T_, typename U>
 void commutator_kq_general(BlockMatrix<T_>& output__, U scalar__, const BlockMatrix<T_>& A__,
-                           const BlockMatrix<T_>& B__, const mdarray<int,2>& ikq__, const mdarray<int,2>& iqmp__)
+                           const BlockMatrix<T_>& B__, const mdarray<int,2>& ikq__, const mdarray<int,2>& iqmp__,
+                           const std::vector<int>* kpos__ = nullptr, const int ik_offset__ = 0)
 {
-    const int nk = B__.get_nk();
-    const int nq = B__.get_nq();
-    assert( A__.get_nk() == nk && A__.get_nq() == nq );
-    assert( output__.get_nk() == nk && output__.get_nq() == nq );
+    const int nk = output__.get_nk();
+    const int nq = output__.get_nq();
+    assert( A__.get_nk() == B__.get_nk() && A__.get_nq() == nq && B__.get_nq() == nq );
+    auto pos = [&](int ik_glob) { return kpos__ ? (*kpos__)[ik_glob] : ik_glob; };
     const T_ s = scalar__;
     const T_ one = 1.;
     /* each (ik, iq) writes only its own block: no race */
@@ -325,18 +329,23 @@ void commutator_kq_general(BlockMatrix<T_>& output__, U scalar__, const BlockMat
     for (int ik = 0; ik < nk; ++ik) {
         for (int iq = 0; iq < nq; ++iq) {
             const int iblock = ik*nq + iq;
+            const int ik_h = pos(ik + ik_offset__);
             for (int ip = 0; ip < nq; ++ip) {
-                const int ikp = ikq__(ik, ip);
+                const int ikp_h = pos(ikq__(ik + ik_offset__, ip));
                 const int iqp = iqmp__(iq, ip);
-                Matrix_gemm(output__[iblock],  s, A__[ikp*nq + iqp], B__[ik*nq + ip], one);
-                Matrix_gemm(output__[iblock], -s, B__[ikp*nq + iqp], A__[ik*nq + ip], one);
+                assert( ik_h >= 0 && ikp_h >= 0 );
+                Matrix_gemm(output__[iblock],  s, A__[ikp_h*nq + iqp], B__[ik_h*nq + ip], one);
+                Matrix_gemm(output__[iblock], -s, B__[ikp_h*nq + iqp], A__[ik_h*nq + ip], one);
             }
         }
     }
 }
 
 /// Output(k,q) += scalar*( H(k+q) rho(k,q) - rho(k,q) H(k) ), H diagonal in k (nq = 1), rho with nq.
-/// ikq__(ik, iq) = index of k + q[iq] in the k grid. For now only 1 rank (local index = global index).
+/// ikq__(ik, iq) = global index of k + q[iq] in the k grid. input2__ (rho) and output__ have the local k points
+/// (global index ik + ik_offset__). input1__ (H) contains the local k points and the ones of other ranks needed here
+/// (halo buffer of parallel::HaloK): the global k is at the block (*kpos__)[ik_glob]. With kpos__ = nullptr (one
+/// rank) input1__ has all the k points in the global order.
 template <typename T_, typename U>
 void commutator_kq(BlockMatrix<T_>& output__, 
                   U scalar__, 
@@ -344,13 +353,16 @@ void commutator_kq(BlockMatrix<T_>& output__,
                   const BlockMatrix<T_>& input2__, 
                   const bool& erase_output__, 
                   const Processor& proc__,
-                  const mdarray<int,2>& ikq__)
+                  const mdarray<int,2>& ikq__,
+                  const std::vector<int>* kpos__ = nullptr,
+                  const int ik_offset__ = 0)
 {
     assert( input1__.get_nq() == 1 );
     const int nk = input2__.get_nk();
     const int nq = input2__.get_nq();
-    assert( input1__.get_nk() == nk && output__.get_nk() == nk && output__.get_nq() == nq );
+    assert( output__.get_nk() == nk && output__.get_nq() == nq );
     assert( proc__ == host ); //TODO: gpu version
+    auto pos = [&](int ik_glob) { return kpos__ ? (*kpos__)[ik_glob] : ik_glob; };
     if( erase_output__ ) {
         output__.fill(0.);
     }
@@ -358,8 +370,9 @@ void commutator_kq(BlockMatrix<T_>& output__,
     for( int ik = 0; ik < nk; ++ik ) {
         for( int iq = 0; iq < nq; ++iq ) {
             const int iblock = ik*nq + iq;
-            Matrix_gemm(output__[iblock],  scalar__, input1__[ikq__(ik, iq)], input2__[iblock], 1.+im*0.);
-            Matrix_gemm(output__[iblock], -scalar__, input2__[iblock], input1__[ik], 1.+im*0.);
+            const int ik_glob = ik + ik_offset__;
+            Matrix_gemm(output__[iblock],  scalar__, input1__[pos(ikq__(ik_glob, iq))], input2__[iblock], 1.+im*0.);
+            Matrix_gemm(output__[iblock], -scalar__, input2__[iblock], input1__[pos(ik_glob)], 1.+im*0.);
         }
     }
 }
@@ -377,6 +390,7 @@ void commutator(BlockMatrix<T_>& output__,
     if (! ikq__) {
             commutator_k(output__, scalar__, input1__, input2__, erase_output__, proc__);
         } else {
+            /* one rank only: input1__ has all the k points (with more ranks use commutator_kq with a HaloK buffer) */
             commutator_kq(output__, scalar__, input1__, input2__, erase_output__, proc__, *ikq__);
         }
 }

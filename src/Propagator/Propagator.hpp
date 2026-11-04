@@ -10,6 +10,7 @@
 #include "MeanField/MeanField.hpp"
 #include "Phonons/Lattice.hpp"
 #include "Propagator/PropagatorParameters.hpp"
+#include "Parallel/HaloK.hpp"
 
 /// @brief Time propagation of the electronic density matrix. It defines the equation of motion
 /// @f[
@@ -50,6 +51,11 @@ class Propagator : public CommutatorEquation
         const mdarray<int,2>* ikq_ = nullptr;
         /// iqmp_(iq, ip) = index of q[iq] - q[ip] in the q grid, used in the commutator when H has q components
         const mdarray<int,2>* iqmp_ = nullptr;
+        /// Communication of the k points of other ranks needed by the commutator with nq > 1 (k + q, k + p)
+        parallel::HaloK halo_k_;
+        /// H and rho at the local k points and at the ones received from other ranks (halo_k_), nq > 1
+        BlockMatrix<std::complex<double>> H_halo_;
+        BlockMatrix<std::complex<double>> rho_halo_;
         /// equilibrium density matrix with the Peierls phase (nq = 1), used for the decay when nq > 1
         Operator<std::complex<double>> dm0_peierls_;
         /// Same as Rgrid_gamma_ (local part, cartesian), in a contiguous array for the gpu
