@@ -78,6 +78,7 @@ void Simulation::write_checkpoint(const std::string& directory__)
         header["initial_time"] = ctx_->cfg().initialtime();
         header["step"] = propagator_.current_step();
         header["grid"] = ctx_->cfg().grid();
+        header["qgrid"] = ctx_->cfg().qgrid();
         header["num_ranks"] = comm.size();
         header["with_reference"] = y.with_reference;
         if( propagator_.lattice() ) {
@@ -126,6 +127,14 @@ long Simulation::read_checkpoint_step(const std::string& directory__)
     }
     if( header["grid"].get<std::array<int, 3>>() != ctx_->cfg().grid() ) {
         throw std::runtime_error("Checkpoint: grid differs from the input\n");
+    }
+    /* checkpoints written before the q grid have nq = 1 */
+    std::array<int, 3> qgrid = {1, 1, 1};
+    if( header.contains("qgrid") ) {
+        qgrid = header["qgrid"].get<std::array<int, 3>>();
+    }
+    if( qgrid != ctx_->cfg().qgrid() ) {
+        throw std::runtime_error("Checkpoint: qgrid differs from the input\n");
     }
     if( ctx_->cfg().solver() != "RK" ) {
         throw std::runtime_error("Checkpoint: restart only with RK\n");

@@ -197,9 +197,15 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     }
 
 #ifdef EDUS_HDF5
-    if( nq_ == 1 ) {
-        initialize_h5(input_dict__, gridstructure__);
+    /* with nq > 1 the Bloch gauge of rho(k,q) needs U(k+q): eigenvectors at the halo k points (fixed) */
+    if( nq_ > 1 && parameters_.print_DMk_bloch ) {
+        auto& halo = propagator_->halo_k();
+        auto& U = *Operator<std::complex<double>>::EigenVectors;
+        U_halo_ = BlockMatrix<std::complex<double>>(Space::k, halo.n_halo(), U.get_nrows(), U.get_ncols());
+        halo.exchange(U_halo_, U);
+        dm_bloch_q_ = BlockMatrix<std::complex<double>>(Space::k, DMk.get_nk(), DMk.get_nrows(), DMk.get_ncols(), 0, nq_);
     }
+    initialize_h5(input_dict__, gridstructure__);
 #endif
 }
 
@@ -240,11 +246,12 @@ void OutputManager::write(const double& time__)
             print_population(time__, BandGauge::wannier);
             print_current_q(time__);
             print_velocity_energy(time__);
-            return;
         }
-        print_population(time__, BandGauge::bloch);
-        print_population(time__, BandGauge::wannier);
-        print_velocity_energy(time__);
+        else {
+            print_population(time__, BandGauge::bloch);
+            print_population(time__, BandGauge::wannier);
+            print_velocity_energy(time__);
+        }
     }
 #ifdef EDUS_HDF5
     bool print_h5 = ( parameters_.printresolution_h5 > 0
@@ -996,6 +1003,16 @@ void OutputManager::initialize_h5(nlohmann::json dict__, const GridStructure& gr
         }
     }
     dict__["kpoints"] = bare_k;
+    /* q grid: with nq > 1 the blocks of each rank are ordered (k, q, n, m), X_nm(k,q) = <n,k+q|X|m,k> */
+    auto& qgrid = *gridstructure__.qgrid();
+    dict__["num_qpoints"] = qgrid.get_TotalSize();
+    mdarray<double, 2> bare_q({ qgrid.get_TotalSize(), 3 });
+    for (int iq = 0; iq < qgrid.get_TotalSize(); ++iq) {
+        for (auto& ix : { 0, 1, 2 }) {
+            bare_q(iq, ix) = qgrid[iq].get(LatticeVectors(k))[ix];
+        }
+    }
+    dict__["qpoints"] = bare_q;
     dict__["A"] = Coordinate::get_Basis(LatticeVectors(R)).get_M();
     dict__["B"] = Coordinate::get_Basis(LatticeVectors(k)).get_M();
     dict__["comm_size"] = decomposition_->kpool_comm().size();
@@ -1039,7 +1056,35 @@ void OutputManager::write_h5(const double& time__)
         DM.go_to_k(false);
         DM.get_Operator_k().write_h5(name, nodename::DMk, node.str(), decomposition_->kpool_comm());
     }
-    if( parameters_.print_DMk_bloch ) {
+    if( parameters_.print_DMk_bloch && nq_ > 1 ) {
+        /* rho^bloch(k,q) = U(k+q)^dagger rho(k,q) U(k), U(k+q) from the halo */
+        DM.go_to_k(false);
+        auto& rho = DM.get_Operator_k();
+        auto& U = *Operator<std::complex<double>>::EigenVectors;
+        auto& halo = propagator_->halo_k();
+        auto& pos = halo.position();
+        const int nb = rho.get_nrows();
+        dm_bloch_q_.fill(0.);
+        #pragma omp parallel for collapse(2)
+        for( int ik = 0; ik < rho.get_nk(); ++ik ) {
+            for( int iq = 0; iq < nq_; ++iq ) {
+                const auto& Ukq = U_halo_[pos[(*ikq_)(ik + halo.offset(), iq)]];
+                for( int i = 0; i < nb; ++i ) {
+                    for( int j = 0; j < nb; ++j ) {
+                        std::complex<double> sum = 0.;
+                        for( int n = 0; n < nb; ++n ) {
+                            for( int m = 0; m < nb; ++m ) {
+                                sum += std::conj(Ukq(n, i)) * rho(ik, iq, n, m) * U(ik, 0, m, j);
+                            }
+                        }
+                        dm_bloch_q_(ik, iq, i, j) = sum;
+                    }
+                }
+            }
+        }
+        dm_bloch_q_.write_h5(name, nodename::DMk_bloch, node.str(), decomposition_->kpool_comm());
+    }
+    else if( parameters_.print_DMk_bloch ) {
         DM.go_to_k(false);
         DM.go_to_bloch();
         DM.get_Operator_k().write_h5(name, nodename::DMk_bloch, node.str(), decomposition_->kpool_comm());

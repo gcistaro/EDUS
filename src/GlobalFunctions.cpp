@@ -59,6 +59,11 @@ void dump_json_in_h5( const nlohmann::json& data__, const std::string& name__ )
             fout["json"][lasername].write("polarization", polarization);
         }
         fout["json"].write("kpoints", data__["kpoints"].get<std::vector<double>>());
+        /* q grid (nq = 1: only q = 0); with nq > 1 the blocks are ordered (k, q, n, m) */
+        if ( data__.contains("num_qpoints") ) {
+            fout["json"].write("num_qpoints", data__["num_qpoints"].template get<int>());
+            fout["json"].write("qpoints", data__["qpoints"].get<std::vector<double>>());
+        }
         fout["json"].write("A", data__["A"].get<std::vector<double>>());
         fout["json"].write("B", data__["B"].get<std::vector<double>>());
     }

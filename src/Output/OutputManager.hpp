@@ -55,6 +55,9 @@ class OutputManager
         mdarray<std::complex<double>,2> phase_tau_;
         /// sum over the local k of the terms p != 0 of the velocity, sum_p Tr[v(k+p,-p) rho(k,p)], added in Velocity.txt
         std::array<std::complex<double>, 3> velocity_q_terms_{};
+        /// nq > 1, h5 in the Bloch gauge: eigenvectors U at the halo k points (k + q) and workspace for rho^bloch(k,q)
+        BlockMatrix<std::complex<double>> U_halo_;
+        BlockMatrix<std::complex<double>> dm_bloch_q_;
         /// j(q,t), written when nq > 1
         std::ofstream os_current_q_;
         /// V0 f(t) of the local potential, written when it is enabled
