@@ -26,8 +26,9 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
     if( gridstructure__.qgrid()->get_TotalSize() > 1 && !parameters_.peierls && parameters_.gradient_space != R ) {
         throw std::runtime_error("Propagator: nq > 1 without Peierls requires gradient_space = R\n");
     }
-    if( gridstructure__.qgrid()->get_TotalSize() > 1 && lattice__ ) {
-        throw std::runtime_error("Propagator: nq > 1 is not implemented with phonons\n");
+    if( gridstructure__.qgrid()->get_TotalSize() > 1 && lattice__
+        && state__.H().get_nq() != gridstructure__.qgrid()->get_TotalSize() ) {
+        throw std::runtime_error("Propagator: with phonons and nq > 1 the Hamiltonian must have the q components\n");
     }
     if( gridstructure__.qgrid()->get_TotalSize() > 1 && meanfield__.parameters().enabled
         && state__.H().get_nq() != gridstructure__.qgrid()->get_TotalSize() ) {
@@ -44,8 +45,9 @@ void Propagator::initialize(const PropagatorParameters& parameters__,
         const int iR0_global = gridstructure__.Rgrid()->find(Coordinate(0,0,0));
         const auto& mpindex = state__.H().get_mpindex();
         iR0_local_ = mpindex.is_local(iR0_global) ? mpindex.glob1D_to_loc1D(iR0_global) : -1;
-        /* without mean field H(k,q) != 0 only at q = 0 (H0 + E.r) and +-q0 (V): the commutator skips the rest */
-        if( !meanfield__.parameters().enabled ) {
+        /* without mean field and phonons H(k,q) != 0 only at q = 0 (H0 + E.r) and +-q0 (V): the commutator skips the
+           rest. The phonons put u(q).g(q) in every q slice where u(q) != 0, that can be any q: all of them are kept */
+        if( !meanfield__.parameters().enabled && !lattice__ ) {
             active_q_ = local_potential_.active_q();
         }
     }

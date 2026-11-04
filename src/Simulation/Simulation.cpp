@@ -57,10 +57,13 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
         output::print("It is recommended to restart the simulation with the file wannier_tb.dat that I will print");
         electrons_.print_wannier("wannier_tb.dat", gridstructure_, decomposition_.kpool_comm());
     }
-    /* with the mean field or the local potential and nq > 1 the Hamiltonian has q components: H_ gets them */
+    /* with the mean field, the local potential or the phonons and nq > 1 the Hamiltonian has q components: H_ gets
+       them (the phonon at q couples k to k+q, like the local potential) */
     auto meanfield_parameters = electron::MeanFieldParametersFactory::create( ctx_->cfg() );
+    auto phonon_parameters = phonon::PhononParametersFactory::create( ctx_->cfg() );
     const bool hamiltonian_with_q = ( gridstructure_.qgrid()->get_TotalSize() > 1 &&
-                                      ( meanfield_parameters.enabled || ctx_->cfg().local_potential().enabled() ) );
+                                      ( meanfield_parameters.enabled || ctx_->cfg().local_potential().enabled()
+                                        || phonon_parameters.enabled ) );
     electrons_state_.initialize(gridstructure_, num_bands_, decomposition_.mpindex(), decomposition_.mpindex_q(),
                                 hamiltonian_with_q);
 
@@ -73,7 +76,6 @@ Simulation::Simulation(std::shared_ptr<Simulation_parameters>& ctx__)
                            electrons_.wannier_centers(), 
                            decomposition_ );
 
-    auto phonon_parameters = phonon::PhononParametersFactory::create( ctx_->cfg() );
     if( phonon_parameters.enabled ) {
         output::print("-> initializing phonons");
         lattice_.initialize( phonon_parameters, gridstructure_, decomposition_, electrons_, material, &meanfield_ );

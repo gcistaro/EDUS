@@ -843,8 +843,30 @@ void OutputManager::print_velocity_energy(const double& time__)
         os_velocity_sigma_ << std::endl;
     }
 
-    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 (not yet with nq > 1) */
+    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 (not yet with nq > 1).
+       With phonons and nq > 1, provisionally: Lattice.txt and Modes.txt with q = 0 only, the lattice energy of all q and,
+       as coupling, u(0).F[rho - rho0](0) (no rho_BO term). The full output at q is in a later step */
     if( nq_ > 1 ) {
+        if( lattice ) {
+            auto& x = state_->lattice();
+            double coupling = 0.;
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                coupling += x.displacement(0, mu).real() * force_full[mu];
+            }
+            os_lattice_ << std::setw(22) << std::setprecision(12) << time__
+                        << std::setw(22) << std::setprecision(12) << lattice->energy(x)
+                        << std::setw(22) << std::setprecision(12) << coupling;
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                os_lattice_ << std::setw(22) << std::setprecision(12) << x.displacement(0, mu).real();
+            }
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                os_lattice_ << std::setw(22) << std::setprecision(12) << x.velocity(0, mu).real();
+            }
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                os_lattice_ << std::setw(22) << std::setprecision(12) << force_excited[mu];
+            }
+            os_lattice_ << std::endl;
+        }
         return;
     }
     auto field = (*lasers_)(time__).get("Cartesian");

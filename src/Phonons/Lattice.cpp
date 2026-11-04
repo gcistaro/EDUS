@@ -1121,25 +1121,35 @@ void Lattice::initial_condition(Coordinates& x__) const
     }
 }
 
-/// @brief Electrons in the displaced lattice: H(R) += sum_mu u_mu g_mu(R), on the local R points, with g_s if
-/// given, g_b otherwise.
+/// @brief Electrons in the displaced lattice: H(R;q) += sum_mu u_mu(q) g_mu(R;q), on the local R points and for
+/// every q slice of H, with g_s if given, g_b otherwise.
+///
+/// With u(R_p) = sum_q u(q) e^{iq.R_p} the potential of the displaced lattice is sum_q u_mu(q) dV/du_mu(q), whose
+/// matrix element between k+q (rows) and k (columns) is u_mu(q) g_mu(k,q): it goes into H(k,q) = h(k+q,k), local in k
+/// (and in R) like the local potential. If H has only q = 0 (nq = 1, or the Hamiltonian of the output that has
+/// only the q = 0 slice) only u(0) g(0) is added.
 /// It is called on the R component of the Hamiltonian, after H0 + E.r and the self energy and before the Peierls
 /// phase, like any other lattice-periodic term of the Hamiltonian.
 void Lattice::add_coupling(Operator<std::complex<double>>& H__, const Coordinates& x__, const bool bare__) const
 {
     auto& HR = H__.get_Operator(R);
+    const int nq = std::min(HR.get_nq(), x__.num_qpoints());
     for( int mu = 0; mu < num_modes_; ++mu ) {
-        /* at q = 0 the displacement is real (only its real part is used, to keep H hermitian) */
-        double u = x__.displacement(0, mu).real();
-        if( u == 0. ) {
-            continue;
-        }
         auto& gR = ( bare__ ? coupling(mu) : electronic_coupling(mu) ).get_Operator(R);
-        #pragma omp parallel for schedule(static)
-        for( int iR = 0; iR < HR.get_nblocks(); ++iR ) {
-            for( int i = 0; i < num_bands_; ++i ) {
-                for( int j = 0; j < num_bands_; ++j ) {
-                    HR(iR, i, j) += u * gR(iR, i, j);
+        for( int iq = 0; iq < nq; ++iq ) {
+            /* at q = 0 the displacement is real (only its real part is used, to keep H hermitian). At q != 0 u(q) is
+               complex, and the hermiticity of the whole H comes from u(-q) = u(q)^* and g(k+q,-q) = g(k,q)^dagger */
+            std::complex<double> u = ( iq == 0 ? std::complex<double>(x__.displacement(0, mu).real(), 0.)
+                                               : x__.displacement(iq, mu) );
+            if( u == 0. ) {
+                continue;
+            }
+            #pragma omp parallel for schedule(static)
+            for( int iR = 0; iR < HR.get_nk(); ++iR ) {
+                for( int i = 0; i < num_bands_; ++i ) {
+                    for( int j = 0; j < num_bands_; ++j ) {
+                        HR(iR, iq, i, j) += u * gR(iR, iq, i, j);
+                    }
                 }
             }
         }
@@ -1219,11 +1229,12 @@ std::vector<double> Lattice::force(const Operator<std::complex<double>>& rho__, 
     for( int mu = 0; mu < num_modes_; ++mu ) {
         auto& gR = coupling_[mu].get_Operator(R);
         double sum = 0.;
+        /* only q = 0 for now (nq > 1: the q = 0 slice of g, rho and the reference; F(q != 0) is not computed yet) */
         #pragma omp parallel for reduction(+:sum)
-        for( int iR = 0; iR < gR.get_nblocks(); ++iR ) {
+        for( int iR = 0; iR < gR.get_nk(); ++iR ) {
             for( int i = 0; i < num_bands_; ++i ) {
                 for( int j = 0; j < num_bands_; ++j ) {
-                    sum += (gR(iR, i, j) * std::conj(rho(iR, i, j) - rho0(iR, i, j))).real();
+                    sum += (gR(iR, 0, i, j) * std::conj(rho(iR, 0, i, j) - rho0(iR, 0, i, j))).real();
                 }
             }
         }
@@ -1249,10 +1260,10 @@ std::vector<double> Lattice::force_k(const Operator<std::complex<double>>& rho__
         auto& gk = coupling_[mu].get_Operator(Space::k);
         double sum = 0.;
         #pragma omp parallel for reduction(+:sum)
-        for( int ik = 0; ik < gk.get_nblocks(); ++ik ) {
+        for( int ik = 0; ik < gk.get_nk(); ++ik ) {
             for( int n = 0; n < num_bands_; ++n ) {
                 for( int m = 0; m < num_bands_; ++m ) {
-                    sum += (gk(ik, n, m) * (rho(ik, m, n) - rho0(ik, m, n))).real();
+                    sum += (gk(ik, 0, n, m) * (rho(ik, 0, m, n) - rho0(ik, 0, m, n))).real();
                 }
             }
         }
