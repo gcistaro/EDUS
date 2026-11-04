@@ -82,6 +82,11 @@ class Lattice
         int num_atoms_ = 0;
         int num_modes_ = 0;
         int num_bands_ = 0;
+        /// Number of phonon wavevectors: the points of the q grid of the simulation (q = 0 is the first)
+        int num_qpoints_ = 1;
+        /// Index in the q grid of +q0 and -q0, the wavevector of the initial displacement (the same point if q0 = 0 or G/2)
+        int iq_displacement_plus_ = 0;
+        int iq_displacement_minus_ = 0;
         /// Mass of the atom of each mode (electron masses)
         std::vector<double> mass_;
         /// Force constants of ph.x used in the dynamics, for each q point: (nq, mu, nu), Ha/bohr^2
@@ -179,7 +184,8 @@ class Lattice
                         const parallel::Decomposition& decomposition__, const electron::System& system__,
                         Material& material__, electron::MeanField* meanfield__);
 
-        /// Allocates the coordinates and sets the initial displacement (lattice at rest)
+        /// Allocates the coordinates (one wavevector per point of the q grid) and sets the initial displacement
+        /// u_mu(R) = d_mu cos(q0.R), i.e. u_mu(+-q0) = d_mu/2 (d_mu if q0 = -q0 on the grid), lattice at rest
         void initial_condition(Coordinates& x__) const;
         /// H__(R) += sum_mu u_mu g_mu(R), g_s if given, g_b otherwise or if bare__ (the R component of H__ must be up to date)
         void add_coupling(Operator<std::complex<double>>& H__, const Coordinates& x__, const bool bare__ = false) const;
@@ -218,7 +224,7 @@ class Lattice
         /// True if rho_BO (dynamic, with g_s) is propagated with u.g_b + Sigma[rho_BO - rho0]
         bool adiabatic_bare() const { return parameters_.screened() && dynamic_reference() && parameters_.adiabatic_bare; }
         int num_modes() const { return num_modes_; }
-        int num_qpoints() const { return int(parameters_.qpoints.size()); }
+        int num_qpoints() const { return num_qpoints_; }
         const std::vector<double>& mass() const { return mass_; }
         /// Bare coupling g_b of the mode mu__ (force on the lattice)
         const Operator<std::complex<double>>& coupling(const int mu__) const { return coupling_[mu__]; }

@@ -339,10 +339,15 @@
                     "default": "",
                     "title": "Dynamical matrix of ph.x at Gamma (text format, e.g. prefix.dyn1): masses and force constants"
                 },
-                "qpoints": {
+                "ifc_file": {
+                    "type": "string",
+                    "default": "",
+                    "title": "Interatomic force constants of q2r.x (text format, e.g. prefix.fc): force constants K(q) on the q grid of the simulation. Needed if the q grid (qgrid) has more than one point; the lattice has one wavevector per point of the q grid"
+                },
+                "initial_displacement_q": {
                     "type": "array",
-                    "default": [[0.0, 0.0, 0.0]],
-                    "title": "Phonon wavevectors in crystal coordinates. Only Gamma is implemented"
+                    "default": [0.0, 0.0, 0.0],
+                    "title": "Wavevector q0 of the initial displacement, crystal coordinates (it must be a point of the q grid, together with -q0): the atom in the cell R is displaced by initial_displacement*cos(q0.R), R lattice vector. [0, 0, 0] = the same displacement in every cell"
                 },
                 "spin_degeneracy": {
                     "type": "number",

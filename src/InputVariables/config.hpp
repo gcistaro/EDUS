@@ -548,7 +548,8 @@ class config_t
         std::string epw_directory_screened() const { return dict_.at("epw_directory_screened").get<std::string>(); }
         std::string epmatwp_screened() const { return dict_.at("epmatwp_screened").get<std::string>(); }
         std::string dyn_file() const { return dict_.at("dyn_file").get<std::string>(); }
-        std::vector<std::vector<double>> qpoints() const { return dict_.at("qpoints").get<std::vector<std::vector<double>>>(); }
+        std::string ifc_file() const { return dict_.at("ifc_file").get<std::string>(); }
+        std::vector<double> initial_displacement_q() const { return dict_.at("initial_displacement_q").get<std::vector<double>>(); }
         double spin_degeneracy() const { return dict_.at("spin_degeneracy").get<double>(); }
         double damping_time() const { return dict_.at("damping_time").get<double>(); }
         void damping_time(double damping_time__) { dict_["damping_time"] = damping_time__; }

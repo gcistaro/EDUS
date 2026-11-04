@@ -32,6 +32,26 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
     comm_ = &decomposition__.kpool_comm();
     num_bands_ = system__.num_bands();
 
+    /* 0. phonon wavevectors: the points of the q grid, with u_mu(R) = sum_q u_mu(q) e^{+iq.R} (see EHRENFEST.md, 7) */
+    num_qpoints_ = gridstructure__.qgrid()->get_TotalSize();
+    if( num_qpoints_ > 1 && parameters_.ifc_file.empty() ) {
+        throw std::runtime_error("phonons/ifc_file: with more than one q point the force constants K(q) are needed "
+                                 "(interatomic force constants of q2r.x)\n");
+    }
+    {
+        auto& q0 = parameters_.initial_displacement_q;
+        Coordinate qplus(q0[0], q0[1], q0[2], LatticeVectors(k));
+        Coordinate qminus(-q0[0], -q0[1], -q0[2], LatticeVectors(k));
+        iq_displacement_plus_ = gridstructure__.qgrid()->find(qplus);
+        iq_displacement_minus_ = gridstructure__.qgrid()->find(qminus);
+        if( iq_displacement_plus_ < 0 || iq_displacement_minus_ < 0 ) {
+            std::stringstream ss;
+            ss << "phonons/initial_displacement_q = (" << q0[0] << ", " << q0[1] << ", " << q0[2]
+               << "): q0 and -q0 must be points of the q grid\n";
+            throw std::runtime_error(ss.str());
+        }
+    }
+
     /* 1. couplings: sets also num_atoms_ and num_modes_ (= 3 * num_atoms_) */
     read_coupling(parameters_.epw_directory, parameters_.epmatwp, gridstructure__, decomposition__, material__,
                   coupling_, gauge_check_);
@@ -234,7 +254,7 @@ void Lattice::read_coupling(const std::string& directory__, const std::string& e
     }
 
     /* g_mu(R_e; q) for q = Gamma: (mode, R_e, band, band), Ha/bohr */
-    auto g = read_epmatwp(directory__ + "/" + epmatwp__, epw, parameters_.qpoints[0]);
+    auto g = read_epmatwp(directory__ + "/" + epmatwp__, epw, std::array<double, 3>{0., 0., 0.});
     coupling__.resize(num_modes_);
     mdarray<std::complex<double>, 3> values({epw.nrr_k, num_bands_, num_bands_});
     for( int mu = 0; mu < num_modes_; ++mu ) {
@@ -929,8 +949,18 @@ ModeProjection Lattice::project_on_modes(const Coordinates& x__, const std::vect
 void Lattice::initial_condition(Coordinates& x__) const
 {
     x__.initialize(num_qpoints(), num_modes_);
+    /* d cos(q0.R) = d/2 (e^{iq0.R} + e^{-iq0.R}): half at +q0 and half at -q0, which are the same point for
+       q0 = 0 and q0 = G/2 (there cos(q0.R) = e^{iq0.R} = +-1) */
+    const bool same_point = ( iq_displacement_plus_ == iq_displacement_minus_ );
     for( int mu = 0; mu < int(parameters_.initial_displacement.size()); ++mu ) {
-        x__.displacement(0, mu) = parameters_.initial_displacement[mu];
+        const double d = parameters_.initial_displacement[mu];
+        if( same_point ) {
+            x__.displacement(iq_displacement_plus_, mu) = d;
+        }
+        else {
+            x__.displacement(iq_displacement_plus_, mu) = 0.5 * d;
+            x__.displacement(iq_displacement_minus_, mu) = 0.5 * d;
+        }
     }
 }
 
@@ -1134,7 +1164,10 @@ void Lattice::print_recap() const
     }
     output::print("Dynamical matrix         *", std::string(8, ' '), parameters_.dyn_file);
     output::print("Atoms, modes             *", num_atoms_, num_modes_);
-    output::print("q points                 *", num_qpoints(), " (Gamma)");
+    output::print("q points                 *", num_qpoints(), num_qpoints() == 1 ? " (Gamma)" : " (the q grid)");
+    if( !parameters_.ifc_file.empty() ) {
+        output::print("Force constants (q2r)    *", std::string(8, ' '), parameters_.ifc_file);
+    }
     output::print("Spin degeneracy          *", parameters_.spin_degeneracy);
     output::print("Electrons feel           *", std::string(8, ' '),
                   parameters_.screened() ? "u.g_s + Sigma[rho - rho_BO]" : "u.g_b + Sigma[rho - rho0]");

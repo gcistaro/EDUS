@@ -50,8 +50,9 @@ struct PhononParameters
     std::string epmatwp_screened;
     /// Dynamical matrix of ph.x at Gamma (text format), for the masses and the force constants
     std::string dyn_file;
-    /// Phonon wavevectors (crystal coordinates): for now only Gamma
-    std::vector<std::array<double, 3>> qpoints = {{0., 0., 0.}};
+    /// Interatomic force constants of q2r.x (prefix.fc), for K(q) on the q grid; needed if the q grid has more than one
+    /// point. The phonon wavevectors are the points of the q grid of the simulation (GridStructure::qgrid)
+    std::string ifc_file;
     /// Spin degeneracy of the bands: the force on the ions is summed over the spin channels
     double spin_degeneracy = 2.;
     /// Decay time of the amplitude of the oscillations (a.u.), phenomenological. Ignored if ~0
@@ -71,6 +72,9 @@ struct PhononParameters
     int response_max_iterations = 500;
     /// Initial displacement of the atoms (a.u.), 3*atom + direction; empty = lattice at equilibrium
     std::vector<double> initial_displacement;
+    /// Wavevector q0 of the initial displacement (crystal coordinates): u_mu(R) = initial_displacement_mu cos(q0.R),
+    /// with R the lattice vector of the cell
+    std::array<double, 3> initial_displacement_q = {0., 0., 0.};
 
     /// True if the screened coupling is given (two calculations of EPW)
     bool screened() const { return !epw_directory_screened.empty(); }
@@ -132,17 +136,12 @@ public:
         p.adiabatic_bare = ( adiabatic_coupling == "bare" );
         p.initial_displacement = cfg.phonons().initial_displacement();
 
-        p.qpoints.clear();
-        for( auto& q : cfg.phonons().qpoints() ) {
-            if( q.size() != 3 ) {
-                throw std::runtime_error("phonons/qpoints: each q point needs 3 crystal coordinates\n");
-            }
-            p.qpoints.push_back({q[0], q[1], q[2]});
+        auto q0 = cfg.phonons().initial_displacement_q();
+        if( q0.size() != 3 ) {
+            throw std::runtime_error("phonons/initial_displacement_q needs 3 crystal coordinates\n");
         }
-        if( p.qpoints.size() != 1 || std::abs(p.qpoints[0][0]) + std::abs(p.qpoints[0][1]) + std::abs(p.qpoints[0][2]) > 1.e-10 ) {
-            throw std::runtime_error("phonons/qpoints: only q = Gamma is implemented. The lattice at q != 0 needs "
-                                     "the coherences between different k points of the electrons (see src/Phonons/EHRENFEST.md)\n");
-        }
+        p.initial_displacement_q = {q0[0], q0[1], q0[2]};
+        p.ifc_file = cfg.phonons().ifc_file();
 
         /* the name of the epmatwp file is prefix.epmatwp: if not given, look for the only one in the directory */
         if( p.epmatwp.empty() ) {

@@ -387,7 +387,8 @@ Key in \texttt{"phonons"} & Default & Meaning \\
 \texttt{epw\_directory} & \texttt{./epw} & directory with \file{epwdata.fmt}, \file{wigner.fmt}, \file{crystal.fmt}, \file{*.epmatwp} \\
 \texttt{epmatwp} & \texttt{""} & file name, if empty the only \file{*.epmatwp} of the directory \\
 \texttt{dyn\_file} & \texttt{""} & dynamical matrix at $\Gamma$ of ph.x (text), required \\
-\texttt{qpoints} & \texttt{[[0,0,0]]} & phonon wavevectors, only $\Gamma$ accepted \\
+\texttt{ifc\_file} & \texttt{""} & force constants of q2r.x, $K(q)$ on the q grid (needed if \texttt{qgrid} has more than one point) \\
+\texttt{initial\_displacement\_q} & \texttt{[0,0,0]} & $q_0$ of the initial displacement, $u(R) = d\cos(q_0\cdot R)$ \\
 \texttt{spin\_degeneracy} & 2 & $s$ in the force (1 with spin--orbit) \\
 \texttt{damping\_time} (+ units) & 0 (fs) & amplitude decay time $\tau$, 0 = none \\
 \texttt{coupling\_scale} & 1 & multiplies $g$ (0 = decoupled lattice) \\
