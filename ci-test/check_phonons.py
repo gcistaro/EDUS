@@ -5,6 +5,7 @@ Analytic checks of the Ehrenfest dynamics of the lattice (Output/Lattice.txt and
    max|E - E(0)| must be small compared with the energy of the lattice (both per spin channel in Energy.txt).
    With the screened coupling (epw_directory_screened) and the mean field it is conserved only if
    g_b = g_s - Sigma[chi0 g_s], which synthetic data do not satisfy: then the drift is only printed.
+With nq > 1 (qgrid): the energies of the modes of K(q) in LatticeQ.txt must add up to E_lattice, and u(-q) = u(q)^*.
 2. Only the excited electrons, rho - rho_BO, push the atoms, and the force constants are those of ph.x: small oscillations started from "initial_displacement" must have a frequency of the
    dynamical matrix of ph.x (static limit; with "static" the non-adiabatic correction is of order (omega/gap)^2,
    with "dynamic" and no laser rho = rho_BO and the frequency is exact).
@@ -100,8 +101,12 @@ if np.abs(energy[:, 5]).max() < 1.e-300:
     else:
         print(f"[OK] lattice energy: max|E - E(0)| / max(E_lattice) = {drift / scale:.2e}")
 
-# 2. static limit
-if phonons.get("initial_displacement"):
+nq = int(np.prod(inp.get("qgrid", [1, 1, 1])))
+
+# 2. static limit (q = 0, with the dynamical matrix of ph.x)
+if phonons.get("initial_displacement") and nq > 1:
+    print("[INFO] static limit: not checked with nq > 1")
+elif phonons.get("initial_displacement"):
     dyn = phonons["dyn_file"]
     if not os.path.isabs(dyn):
         dyn = os.path.join(os.getcwd(), dyn)
@@ -122,7 +127,21 @@ if phonons.get("initial_displacement"):
 # 3. projection on the normal modes of ph.x: the dynamics uses the force constants of ph.x, so the energies of the
 #    modes add up to E_lattice
 modes_file = os.path.join(args.output_dir, "Phonon_modes.txt")
-if os.path.exists(modes_file):
+if nq > 1:
+    # 3b. nq > 1: the energies of the modes of K(q) at all q add up to E_lattice, and u(-q) = u(q)^* (real u(R))
+    lq = np.loadtxt(os.path.join(args.output_dir, "LatticeQ.txt"), ndmin=2)
+    energy_modes = lq[:, 2:2 + nq * nmodes].sum(axis=1)
+    scale = max(np.abs(lattice[:, 1]).max(), 1.e-300)
+    error = np.abs(energy_modes - lattice[:, 1]).max() / scale
+    reality = np.abs(lq[:, 1]).max() / max(np.abs(lq[:, 2 + 2 * nq * nmodes:]).max(), 1.e-300)
+    for name, value, tol in (("normal modes at q: max|sum E_qlambda - E_lattice| / max(E_lattice)", error, 1.e-8),
+                             ("u(-q) = u(q)^*: max|u(-q) - u(q)^*| / max|u|", reality, 1.e-10)):
+        if value > tol:
+            print(f"[FAIL] {name} = {value:.2e}")
+            failures += 1
+        else:
+            print(f"[OK] {name} = {value:.2e}")
+elif os.path.exists(modes_file):
     modes = np.loadtxt(modes_file, ndmin=2)
     energy_modes = modes[:, 1 + 3 * nmodes:1 + 4 * nmodes].sum(axis=1)
     scale = max(np.abs(lattice[:, 1]).max(), 1.e-300)

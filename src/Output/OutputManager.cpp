@@ -449,7 +449,7 @@ void OutputManager::print_current_q(const double& time__)
     aux.go_to_k();
     auto& rho = aux.get_Operator(Space::k);
 
-    /* H(R;q) = H0 (q = 0) + Sigma(q) + V(+-q0) */
+    /* H(R;q) = H0 (q = 0) + Sigma(q) + V(+-q0) + u(q).g(q) */
     auto& HR = h_q_.get_Operator(R);
     auto& H0R = system_->H0().get_Operator(R);
     HR.fill(0.);
@@ -468,6 +468,10 @@ void OutputManager::print_current_q(const double& time__)
         meanfield_->self_energy(h_q_, aux, system_->DM0());
     }
     propagator_->local_potential().add(HR, has_origin_ ? index_origin_local_ : -1, time__);
+    /* phonons: + sum_mu u_mu(q) g_mu(R;q), as in the Hamiltonian of the propagation */
+    if( propagator_->lattice() ) {
+        propagator_->lattice()->add_coupling(h_q_, state_->lattice());
+    }
 
     /* grad_k H(k,q): i R H(R;q) for every q */
     std::array<Coordinate, 3> direction;

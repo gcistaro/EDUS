@@ -381,6 +381,15 @@ add_test(NAME hBN_HSEX_phonons_static COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/s
 add_test(NAME hBN_HSEX_phonons        COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons        2)
 add_test(NAME hBN_phonons_screened      COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_phonons_screened      2)
 add_test(NAME hBN_HSEX_phonons_screened COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_screened 2)
+# phonons at finite q with the synthetic model at every q (tb_models/hBN_synthetic_epw_q, make_synthetic_epw.py
+# --fc-grid 3 3 1): coherent phonons at q0 = b1/3 driven by a displacement and the laser, against the same system in
+# the supercell 3 x 1 x 1 at Gamma (tb_models/hBN_synthetic_epw_q_sc3, make_supercell_epw.py, ci-test/checks), and
+# phonons excited by the local potential at q0 with Hartree and SEX on the q grid 3 x 3 (energy balance, regression,
+# also with 4 ranks)
+add_test(NAME hBN_phonons_q          COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_phonons_q          2)
+add_test(NAME hBN_HSEX_phonons_q     COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_q     2)
+add_test(NAME hBN_HSEX_phonons_q_np4 COMMAND bash ${CMAKE_SOURCE_DIR}/ci-test/scripts/run.sh hBN_HSEX_phonons_q     4)
+set_tests_properties(hBN_HSEX_phonons_q_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
 # Ehrenfest dynamics with the real output of QE/EPW for monolayer MoS2 (tb_models/MoS2_PBE_epw: PBE, 11 Wannier
 # functions Mo d + S p, coupling at q = 0, 6x6 grid): A1' displaced without laser with the dynamic reference (the
 # frequency of ph.x), and the coherent phonons of a pump at 3 eV, linear and circular, with the symmetry of D3h

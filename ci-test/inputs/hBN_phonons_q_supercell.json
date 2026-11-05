@@ -1,0 +1,35 @@
+{
+    "tb_file": "../../../tb_models/hBN_synthetic_epw_q_sc3/hbn_sc3",
+    "grid": [4, 12, 1],
+    "filledbands": 3,
+    "coulomb": false,
+    "dt": 0.0125,
+    "dt_units": "femtoseconds",
+    "printresolution": 4,
+    "printresolution_pulse": 4,
+    "initialtime": 0,
+    "initialtime_units": "femtoseconds",
+    "finaltime": 10,
+    "finaltime_units": "femtoseconds",
+    "solver": "RK",
+    "order": 4,
+    "lasers": [
+        {
+            "intensity": 100000000000.0,
+            "intensity_units": "wcm2",
+            "frequency": 8,
+            "frequency_units": "electronvolt",
+            "polarization": [1, 0, 0],
+            "cycles": 4,
+            "t0": 0.0,
+            "t0_units": "fs"
+        }
+    ],
+    "phonons": {
+        "enabled": true,
+        "epw_directory": "../../../tb_models/hBN_synthetic_epw_q_sc3",
+        "adiabatic_reference": "dynamic",
+        "initial_displacement": [0.02, 0.01, 0.01, -0.01, 0.005, -0.004, -0.01, -0.005, -0.005, 0.005, -0.0025, 0.002, -0.01, -0.005, -0.005, 0.005, -0.0025, 0.002],
+        "dyn_file": "../../../tb_models/hBN_synthetic_epw_q_sc3/hbn.dyn1"
+    }
+}

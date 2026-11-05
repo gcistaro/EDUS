@@ -114,7 +114,7 @@ fi
 # ─────────────────────────────────────────────
 CHECK="${PROJECT_ROOT}/ci-test/checks/${SEEDNAME}.sh"
 if [ -f "${CHECK}" ]; then
-    PROJECT_ROOT="${PROJECT_ROOT}" bash "${CHECK}" "${INPUT}" || num_failures=$((num_failures+1))
+    PROJECT_ROOT="${PROJECT_ROOT}" BUILD_DIR="${BUILD_DIR}" bash "${CHECK}" "${INPUT}" || num_failures=$((num_failures+1))
 fi
 
 if [ ${num_failures} -ne 0 ]; then
