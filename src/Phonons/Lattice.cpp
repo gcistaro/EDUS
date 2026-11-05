@@ -212,6 +212,29 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
         }
         frequencies_q_[iq] = frequencies_hermitian(Kq);
     }
+    /* normal modes at every q, D(q) = M^{-1/2} K(q) M^{-1/2} = sum_lambda omega^2 e e^dagger (complex at q != 0), for the
+       energy and the number of phonons of each mode in LatticeQ.txt */
+    mode_omega2_q_.resize(num_qpoints());
+    mode_vectors_q_.resize(num_qpoints());
+    for( int iq = 0; iq < num_qpoints(); ++iq ) {
+        Matrix<std::complex<double>> D(num_modes_, num_modes_);
+        for( int mu = 0; mu < num_modes_; ++mu ) {
+            for( int nu = 0; nu < num_modes_; ++nu ) {
+                D(mu, nu) = force_constants_(iq, mu, nu) / std::sqrt(mass_[mu] * mass_[nu]);
+            }
+        }
+        Matrix<std::complex<double>> E;
+        mdarray<double, 1> w2;
+        D.diagonalize(E, w2);
+        mode_omega2_q_[iq].resize(num_modes_);
+        mode_vectors_q_[iq].initialize({num_modes_, num_modes_});
+        for( int lambda = 0; lambda < num_modes_; ++lambda ) {
+            mode_omega2_q_[iq][lambda] = w2(lambda);
+            for( int mu = 0; mu < num_modes_; ++mu ) {
+                mode_vectors_q_[iq](mu, lambda) = E(mu, lambda);
+            }
+        }
+    }
 
     if( !parameters_.initial_displacement.empty() && int(parameters_.initial_displacement.size()) != num_modes_ ) {
         std::stringstream ss;
@@ -1100,6 +1123,31 @@ ModeProjection Lattice::project_on_modes(const Coordinates& x__, const std::vect
         p.population[lambda] = omega > omega_min ? p.energy[lambda] / omega : 0.;
     }
     return p;
+}
+
+/// @brief Energy and number of phonons of each normal mode lambda of K(q), at every q:
+///     Q_lambda(q) = sum_mu e_mu,lambda(q)^* sqrt(M_mu) u_mu(q),    E_qlambda = 1/2 |dQ/dt|^2 + 1/2 omega^2 |Q|^2,
+/// n_qlambda = E_qlambda/omega_qlambda (0 for |omega| < 1 cm^-1). sum_{q,lambda} E_qlambda = E_lattice (energy()).
+/// +q and -q are two points of the grid with the same energy (u(-q) = u(q)^*).
+void Lattice::mode_energies_q(const Coordinates& x__, mdarray<double, 2>& energy__, mdarray<double, 2>& population__) const
+{
+    const double omega_min = 1. / 219474.6313705;
+    energy__.initialize({x__.num_qpoints(), num_modes_});
+    population__.initialize({x__.num_qpoints(), num_modes_});
+    for( int iq = 0; iq < x__.num_qpoints(); ++iq ) {
+        for( int lambda = 0; lambda < num_modes_; ++lambda ) {
+            std::complex<double> Q = 0., dQ = 0.;
+            for( int mu = 0; mu < num_modes_; ++mu ) {
+                auto e = std::conj(mode_vectors_q_[iq](mu, lambda)) * std::sqrt(mass_[mu]);
+                Q += e * x__.displacement(iq, mu);
+                dQ += e * x__.velocity(iq, mu);
+            }
+            const double w2 = mode_omega2_q_[iq][lambda];
+            energy__(iq, lambda) = 0.5 * std::norm(dQ) + 0.5 * w2 * std::norm(Q);
+            const double omega = std::sqrt(std::abs(w2));
+            population__(iq, lambda) = omega > omega_min ? energy__(iq, lambda) / omega : 0.;
+        }
+    }
 }
 
 /// @brief Lattice at t = 0: displaced by initial_displacement (or at equilibrium) and at rest

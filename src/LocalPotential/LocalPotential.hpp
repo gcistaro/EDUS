@@ -108,6 +108,31 @@ namespace electron
                 return parameters_.amplitude*std::exp(-0.5*x*x);
             }
 
+            /// V0 df/dt
+            double amplitude_derivative(const double time__) const
+            {
+                return -(time__ - parameters_.t0)/(parameters_.sigma*parameters_.sigma)*amplitude(time__);
+            }
+            /// Energy of the electrons in the potential, per unit cell and spin channel, on the R = 0 of this rank:
+            ///     <V> = 1/N sum_{k,q} Tr[V(k+q,-q) rho(k,q)] = sum_q sum_R sum_mn conj(V_mn(R;q)) rho_mn(R;q)
+            /// (V(k+q,-q) = V(k,q)^dagger), only R = 0 and q = +-q0. With derivative__ = true the same with dV/dt, the
+            /// power of the potential: d/dt (E + <V>) = <dV/dt>.
+            /// @param rho__ density matrix in R with the q components
+            double energy(const BlockMatrix<std::complex<double>>& rho__, const int iR0_local__, const double time__,
+                          const bool derivative__ = false) const
+            {
+                if( !parameters_.enabled || iR0_local__ < 0 ) {
+                    return 0.;
+                }
+                const double v = 0.5*( derivative__ ? amplitude_derivative(time__) : amplitude(time__) );
+                std::complex<double> e = 0.;
+                for( int n = 0; n < rho__.get_nrows(); ++n ) {
+                    /* with q0 = G/2 both terms are in the same slice, as in add() */
+                    e += std::conj(v*phase_plus_[n])*rho__(iR0_local__, iq_plus_, n, n);
+                    e += std::conj(v*phase_minus_[n])*rho__(iR0_local__, iq_minus_, n, n);
+                }
+                return e.real();
+            }
             /// H(R = 0; q = +-q0) += V0 f(t)/2 e^{+-iq0.tau_n} on the diagonal.
             /// @param H__ Hamiltonian in R with the q components
             /// @param iR0_local__ local index of R = 0 in H__, -1 if R = 0 is not on this rank

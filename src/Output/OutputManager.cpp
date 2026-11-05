@@ -48,6 +48,12 @@ void OutputManager::initialize(const OutputParameters& parameters__,
         ikq_ = &gridstructure__.ikq();
         iqmp_ = &gridstructure__.iqmp();
         auto& qgrid = *gridstructure__.qgrid();
+        /* index of -q for every q (LatticeQ.txt) */
+        minus_q_.assign(nq_, -1);
+        for( int iq = 0; iq < nq_; ++iq ) {
+            auto qc = qgrid[iq].get(LatticeVectors(k));
+            minus_q_[iq] = qgrid.find(Coordinate(-qc[0], -qc[1], -qc[2], LatticeVectors(k)));
+        }
         phase_tau_.initialize({nq_, nb});
         /* q and q + G are the same point of the grid but not the same Fourier component of the density: j(q) is
            the one at the smallest q, crystal coordinates folded in (-1/2, 1/2] */
@@ -65,6 +71,11 @@ void OutputManager::initialize(const OutputParameters& parameters__,
     /* workspace for the energy balance */
     sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "Sigma_energy");
     grad_sigma_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "grad_Sigma_energy");
+    /* nq > 1: self energy with the q components, for the mean-field energy at all q */
+    if( nq_ > 1 && meanfield_->parameters().enabled ) {
+        sigma_q_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex_q(),
+                                "Sigma_q_energy", gridstructure__.qgrid());
+    }
     if( propagator_->lattice() && propagator_->lattice()->static_reference() ) {
         rho_bo_.initialize_fft(gridstructure__.Rgrid(), gridstructure__.kgrid(), DMk.get_nrows(), decomposition_->mpindex(), "rho_BO_output");
     }
@@ -123,9 +134,7 @@ void OutputManager::initialize(const OutputParameters& parameters__,
                                 << "# q0 = q point " << lp.iq_plus() << " of DensityQ.txt (-q0: " << lp.iq_minus() << ")\n"
                                 << "# columns: time (a.u.), V0 f(t) (Hartree)\n";
         }
-        if( nq_ == 1 ) {
-            os_energy_.open(path("Energy.txt"));
-        }
+        os_energy_.open(path("Energy.txt"));
         auto* lattice = propagator_->lattice();
         os_energy_ << "# Energy balance of the electrons, Hartree per unit cell (one spin channel)\n"
                    << "# E_band = Tr[H0 (rho-rho0)], E_MF = 1/2 Tr[Sigma[rho-rho0] (rho-rho0)], E = E_band + E_MF"
@@ -135,14 +144,30 @@ void OutputManager::initialize(const OutputParameters& parameters__,
                    << "# P = -E.v is the power; W is integrated with the 3-point rule (quadratic through three consecutive print steps, error O(dt^3);\n"
                    << "#   trapezoidal rule at the first print step)\n"
                    << "# Without decay, E(t) - E(0) = W(t) up to the error of the time integration of W\n"
+                   << ( nq_ > 1 ? "# nq > 1: E_MF = 1/2 sum_q Tr[Sigma(q) Delta rho(q)] over all q; with the local potential E includes <V> and P its\n"
+                                  "#   power <dV/dt>; the velocity (and P of the laser) has the terms of Sigma(q != 0) not included yet\n" : "" )
                    << "#        time (a.u.)       E_band-E_band(0)                  E_MF              E - E(0)                     P                     W          E - E(0) - W\n";
         if( lattice ) {
             int nmodes = lattice->num_modes();
             os_lattice_.open(path("Lattice.txt"));
             if( nq_ > 1 ) {
                 os_lattice_q_.open(path("LatticeQ.txt"));
-                os_lattice_q_ << "# Displacements u_mu(q) (bohr) of all the q points of the grid, u(R) = sum_q u(q) e^{iq.R}\n"
-                              << "# columns: time (a.u.), then for iq = 0..nq-1 and mu = 0.." << nmodes - 1 << ": Re u_mu(q), Im u_mu(q)\n";
+                const double ha_to_cm = 219474.6313705;
+                os_lattice_q_ << "# Lattice at every q of the grid, u(R) = sum_q u(q) e^{iq.R} (bohr), atomic units per unit cell (all spin channels)\n"
+                              << "# lambda = normal modes of K(q) (eigenvectors of M^-1/2 K(q) M^-1/2), E_qlambda = 1/2|dQ/dt|^2 + 1/2 omega^2 |Q|^2,\n"
+                              << "# Q_lambda(q) = sum_mu e_mu,lambda(q)^* sqrt(M_mu) u_mu(q); n_qlambda = E_qlambda/omega_qlambda; sum_{q,lambda} E = E_lattice\n"
+                              << "# check: max_{q,mu} |u_mu(-q) - u_mu(q)^*| (0 if u(R) is real)\n"
+                              << "# q points (crystal coordinates) and frequencies (cm^-1) of the modes:\n";
+                for( int iq = 0; iq < lattice->num_qpoints(); ++iq ) {
+                    auto& q = lattice->qpoint(iq);
+                    os_lattice_q_ << "#   iq = " << iq << ": " << q[0] << " " << q[1] << " " << q[2] << "   ";
+                    for( int lambda = 0; lambda < nmodes; ++lambda ) {
+                        os_lattice_q_ << " " << std::fixed << std::setprecision(2) << lattice->mode_frequency_q(iq, lambda) * ha_to_cm;
+                    }
+                    os_lattice_q_ << std::defaultfloat << "\n";
+                }
+                os_lattice_q_ << "# columns: time, check, E_qlambda (iq = 0..nq-1, lambda = 0.." << nmodes - 1 << "), n_qlambda (same order),\n"
+                              << "#   Re u_mu(q), Im u_mu(q) (iq = 0..nq-1, mu = 0.." << nmodes - 1 << ")\n";
             }
             os_force_check_.open(path("Force_check.txt"));
             os_force_check_ << "# Check of the force on the lattice: F_R = s sum_R sum_mn g_mn(R) conj(rho - rho_BO)_mn(R) (force used in the\n"
@@ -632,8 +657,9 @@ void OutputManager::print_velocity_energy(const double& time__)
 
     /* local sums: 0-2 H0 part of the velocity (operator of System, already divided by the cell volume),
        3-5 Sigma part of the velocity (not divided), 6 Tr[H0 (rho-rho0)], 7 Tr[Sigma (rho-rho0)],
-       8-9 the same two for rho_BO (dynamic adiabatic reference), 10-12 powers of EnergyTerms.txt */
-    std::array<std::complex<double>, 13> local;
+       8-9 the same two for rho_BO (dynamic adiabatic reference), 10-12 powers of EnergyTerms.txt,
+       nq > 1: 13 sum_q Tr[Sigma(q) Delta rho(q)], 14 the same for rho_BO, 15 <V> and 16 <dV/dt> of the local potential */
+    std::array<std::complex<double>, 17> local;
     local.fill(0.);
     for (auto ix : { 0, 1, 2 }) {
         temp_.fill(0.);
@@ -807,12 +833,68 @@ void OutputManager::print_velocity_energy(const double& time__)
         }
     }
     /* mean-field energy of rho_BO */
-    if( dynamic && meanfield_->parameters().enabled ) {
+    if( dynamic && meanfield_->parameters().enabled && nq_ == 1 ) {
         sigma_.get_Operator(R).fill(0.);
         sigma_.lock_space(R);
         meanfield_->self_energy(sigma_, *rho_bo, system_->DM0());
         sigma_.go_to_k();
         local[9] = trace_product_difference(sigma_.get_Operator(Space::k), rho_bo->get_Operator(Space::k), rho0);
+    }
+    /* nq > 1: the terms of the energy at all q, from the whole density matrix (aux_DM, filled by density_matrix_q0) */
+    phonon::Lattice::Force force_q_full, force_q_bo;
+    if( nq_ > 1 ) {
+        auto& full = state_->aux_DM();
+        full.go_to_R();
+        auto& rhoR = full.get_Operator(R);
+        auto& rho0R = system_->DM0().get_Operator(R);
+        /* sum_q sum_R sum_mn conj(A_mn(R;q)) (B - rho0)_mn(R;q) = 1/N sum_{k,q} Tr[A(k+q,-q) Delta B(k,q)], A hermitian */
+        auto trace_q = [&](const BlockMatrix<std::complex<double>>& A__, const BlockMatrix<std::complex<double>>& B__) {
+            std::complex<double> sum = 0.;
+            for( int iR = 0; iR < B__.get_nk(); ++iR ) {
+                for( int iq = 0; iq < B__.get_nq(); ++iq ) {
+                    for( int n = 0; n < B__.get_nrows(); ++n ) {
+                        for( int m = 0; m < B__.get_ncols(); ++m ) {
+                            auto b = B__(iR, iq, n, m) - ( iq == 0 ? rho0R(iR, 0, n, m) : std::complex<double>(0.) );
+                            sum += std::conj(A__(iR, iq, n, m)) * b;
+                        }
+                    }
+                }
+            }
+            return sum;
+        };
+        if( meanfield_->parameters().enabled ) {
+            sigma_q_.get_Operator(R).fill(0.);
+            sigma_q_.lock_space(R);
+            meanfield_->self_energy(sigma_q_, full, system_->DM0());
+            local[13] = trace_q(sigma_q_.get_Operator(R), rhoR);
+        }
+        local[15] = propagator_->local_potential().energy(rhoR, propagator_->iR0_local(), time__, false);
+        local[16] = propagator_->local_potential().energy(rhoR, propagator_->iR0_local(), time__, true);
+        if( lattice ) {
+            force_q_full = lattice->force(full, system_->DM0());
+            if( dynamic ) {
+                auto& rho_bo_dynamic = state_->variables().rho_bo;
+                force_q_bo = lattice->force(rho_bo_dynamic, system_->DM0());
+                /* Tr[H0 (rho_BO - rho0)] at q = 0 (H0 has only q = 0) */
+                auto& H0k = system_->H0().get_Operator(Space::k);
+                auto& bok = rho_bo_dynamic.get_Operator(Space::k);
+                std::complex<double> e = 0.;
+                for( int ik = 0; ik < bok.get_nk(); ++ik ) {
+                    for( int n = 0; n < bok.get_nrows(); ++n ) {
+                        for( int m = 0; m < bok.get_ncols(); ++m ) {
+                            e += H0k(ik, n, m) * (bok(ik, 0, m, n) - rho0(ik, m, n));
+                        }
+                    }
+                }
+                local[8] = e;
+                if( meanfield_->parameters().enabled ) {
+                    sigma_q_.get_Operator(R).fill(0.);
+                    sigma_q_.lock_space(R);
+                    meanfield_->self_energy(sigma_q_, rho_bo_dynamic, system_->DM0());
+                    local[14] = trace_q(sigma_q_.get_Operator(R), rho_bo_dynamic.get_Operator(R));
+                }
+            }
+        }
     }
     if( dynamic ) {
         /* the propagation aligns the R component again from k */
@@ -848,38 +930,9 @@ void OutputManager::print_velocity_energy(const double& time__)
         os_velocity_sigma_ << std::endl;
     }
 
-    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 (not yet with nq > 1).
-       With phonons and nq > 1, provisionally: Lattice.txt and Modes.txt with q = 0 only, the lattice energy of all q and,
-       as coupling, u(0).F[rho - rho0](0) (no rho_BO term). The full output at q is in a later step */
+    /* energy balance, per unit cell: changes with respect to the equilibrium density matrix rho0 */
     if( nq_ > 1 ) {
-        if( lattice ) {
-            auto& x = state_->lattice();
-            double coupling = 0.;
-            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
-                coupling += x.displacement(0, mu).real() * force_full[mu];
-            }
-            os_lattice_ << std::setw(22) << std::setprecision(12) << time__
-                        << std::setw(22) << std::setprecision(12) << lattice->energy(x)
-                        << std::setw(22) << std::setprecision(12) << coupling;
-            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
-                os_lattice_ << std::setw(22) << std::setprecision(12) << x.displacement(0, mu).real();
-            }
-            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
-                os_lattice_ << std::setw(22) << std::setprecision(12) << x.velocity(0, mu).real();
-            }
-            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
-                os_lattice_ << std::setw(22) << std::setprecision(12) << force_excited[mu];
-            }
-            os_lattice_ << std::endl;
-            os_lattice_q_ << std::setw(22) << std::setprecision(12) << time__;
-            for( int iq = 0; iq < x.num_qpoints(); ++iq ) {
-                for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
-                    os_lattice_q_ << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).real()
-                                  << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).imag();
-                }
-            }
-            os_lattice_q_ << std::endl;
-        }
+        print_energy_q(time__, local, force_q_full, force_q_bo, v, num_k, volume);
         return;
     }
     auto field = (*lasers_)(time__).get("Cartesian");
@@ -971,31 +1024,11 @@ void OutputManager::print_velocity_energy(const double& time__)
         os_modes_ << std::endl;
     }
 
-    /* work of the field with the 3-point rule (the same as ci-test/check_energy.py): the integral on
-       [t_{i-1}, t_i] of the quadratic through P_{i-2}, P_{i-1}, P_i is dt/12 (-P_{i-2} + 8 P_{i-1} + 5 P_i).
-       At the first interval only two points are known and W(t_1) is written with the trapezoidal rule; at the
-       second one W(t_1) is replaced by the integral of the quadratic through P_0, P_1, P_2 */
-    double dt = time__ - last_time_;
-    if( num_energy_steps_ == 0 ) {
-        initial_energy_ = energy;
-        work_ = 0.;
-    }
-    else if( num_energy_steps_ == 1 ) {
-        work_ += 0.5 * (last_power_ + power) * dt;
-    }
-    else if( num_energy_steps_ == 2 ) {
-        work_ = dt / 12. * (5. * second_last_power_ + 8. * last_power_ - power)
-              + dt / 12. * (-second_last_power_ + 8. * last_power_ + 5. * power);
-    }
-    else {
-        work_ += dt / 12. * (-second_last_power_ + 8. * last_power_ + 5. * power);
-    }
-    ++num_energy_steps_;
-    second_last_power_ = last_power_;
-    last_power_ = power;
-    last_time_ = time__;
+    const double previous_time = last_time_;
+    update_work(time__, energy, power);
 
     if( lattice ) {
+        const double dt = time__ - previous_time;
         double residual = energy - initial_energy_ - work_;
         for( int i = 0; i < 4; ++i ) {
             integrate_3pt(power_integral_[i], power_second_last_[i], power_last_[i], powers[i], dt, num_energy_steps_ - 1);
@@ -1018,6 +1051,127 @@ void OutputManager::print_velocity_energy(const double& time__)
         os_energy_terms_ << std::setw(22) << std::setprecision(12) << residual << std::endl;
     }
 
+    for (auto x : { time__, energy_band, energy_mf, energy - initial_energy_, power, work_, energy - initial_energy_ - work_ }) {
+        os_energy_ << std::setw(22) << std::setprecision(12) << x;
+    }
+    os_energy_ << std::endl;
+}
+
+/// @brief Work of the field with the 3-point rule (the same as ci-test/check_energy.py): the integral on
+/// [t_{i-1}, t_i] of the quadratic through P_{i-2}, P_{i-1}, P_i is dt/12 (-P_{i-2} + 8 P_{i-1} + 5 P_i).
+/// At the first interval only two points are known and W(t_1) is written with the trapezoidal rule; at the
+/// second one W(t_1) is replaced by the integral of the quadratic through P_0, P_1, P_2
+void OutputManager::update_work(const double& time__, const double& energy__, const double& power__)
+{
+    const double energy = energy__, power = power__;
+    const double dt = time__ - last_time_;
+    if( num_energy_steps_ == 0 ) {
+        initial_energy_ = energy;
+        work_ = 0.;
+    }
+    else if( num_energy_steps_ == 1 ) {
+        work_ += 0.5 * (last_power_ + power) * dt;
+    }
+    else if( num_energy_steps_ == 2 ) {
+        work_ = dt / 12. * (5. * second_last_power_ + 8. * last_power_ - power)
+              + dt / 12. * (-second_last_power_ + 8. * last_power_ + 5. * power);
+    }
+    else {
+        work_ += dt / 12. * (-second_last_power_ + 8. * last_power_ + 5. * power);
+    }
+    ++num_energy_steps_;
+    second_last_power_ = last_power_;
+    last_power_ = power;
+    last_time_ = time__;
+
+}
+
+/// @brief Energy balance with nq > 1 (Energy.txt), and the lattice at all q (Lattice.txt, LatticeQ.txt).
+/// Per unit cell and spin channel, with Delta rho(k,q) = rho(k,q) - delta_{q0} rho0(k):
+///     E = Tr[H0 Delta rho(q=0)] + 1/2 sum_q Tr[Sigma(q) Delta rho(q)] + <V> + (E_lattice + E_coupling)/s
+/// with E_coupling = sum_q u(q)^*.F[rho - rho0](q) - E[rho_BO] (dynamic reference). With the local potential the
+/// power is P = -E.v Omega + <dV/dt>, and E(t) - E(0) - W(t) = 0 up to the time integration.
+void OutputManager::print_energy_q(const double& time__, const std::array<std::complex<double>, 17>& local__,
+                                   const phonon::Lattice::Force& force_full__, const phonon::Lattice::Force& force_bo__,
+                                   const std::array<std::complex<double>, 3>& v__, const double num_k__, const double volume__)
+{
+    auto field = (*lasers_)(time__).get("Cartesian");
+    double power = 0.;
+    for (auto ix : { 0, 1, 2 }) {
+        power -= field[ix] * v__[ix].real() * volume__;
+    }
+    power += local__[16].real();
+    const double energy_band = local__[6].real() / num_k__;
+    const double energy_mf = 0.5 * local__[13].real();
+    double energy = energy_band + energy_mf + local__[15].real();
+
+    auto* lattice = propagator_->lattice();
+    if( lattice ) {
+        auto& x = state_->lattice();
+        const double s = lattice->parameters().spin_degeneracy;
+        /* sum_q u(q)^*.F(q), u(0) real as in the Hamiltonian */
+        auto dot_u = [&](const phonon::Lattice::Force& F__) {
+            double sum = 0.;
+            for( int iq = 0; iq < F__.get_Size(0); ++iq ) {
+                for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                    auto u = ( iq == 0 ? std::complex<double>(x.displacement(0, mu).real(), 0.) : x.displacement(iq, mu) );
+                    sum += (std::conj(u) * F__(iq, mu)).real();
+                }
+            }
+            return sum;
+        };
+        double coupling = dot_u(force_full__);
+        if( lattice->dynamic_reference() ) {
+            coupling -= s * (local__[8].real() / num_k__ + 0.5 * local__[14].real()) + dot_u(force_bo__);
+        }
+        const double energy_lattice = lattice->energy(x);
+        energy += (energy_lattice + coupling) / s;
+
+        /* force of the dynamics at q = 0, F[rho - rho_BO](0) = F[rho - rho0](0) - F[rho_BO - rho0](0) */
+        os_lattice_ << std::setw(22) << std::setprecision(12) << time__
+                    << std::setw(22) << std::setprecision(12) << energy_lattice
+                    << std::setw(22) << std::setprecision(12) << coupling;
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            os_lattice_ << std::setw(22) << std::setprecision(12) << x.displacement(0, mu).real();
+        }
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            os_lattice_ << std::setw(22) << std::setprecision(12) << x.velocity(0, mu).real();
+        }
+        for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+            double F = force_full__(0, mu).real() - ( force_bo__.get_TotalSize() > 0 ? force_bo__(0, mu).real() : 0. );
+            os_lattice_ << std::setw(22) << std::setprecision(12) << F;
+        }
+        os_lattice_ << std::endl;
+
+        /* LatticeQ.txt: energy and phonons of each mode at each q, the check u(-q) = u(q)^*, and u(q) */
+        mdarray<double, 2> mode_energy, mode_population;
+        lattice->mode_energies_q(x, mode_energy, mode_population);
+        double reality = 0.;
+        for( int iq = 0; iq < x.num_qpoints(); ++iq ) {
+            const int iqm = minus_q_[iq];
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                reality = std::max(reality, std::abs(x.displacement(iqm, mu) - std::conj(x.displacement(iq, mu))));
+            }
+        }
+        os_lattice_q_ << std::setw(22) << std::setprecision(12) << time__
+                      << std::setw(22) << std::setprecision(12) << reality;
+        for( auto* a : { &mode_energy, &mode_population } ) {
+            for( int iq = 0; iq < x.num_qpoints(); ++iq ) {
+                for( int lambda = 0; lambda < lattice->num_modes(); ++lambda ) {
+                    os_lattice_q_ << std::setw(22) << std::setprecision(12) << (*a)(iq, lambda);
+                }
+            }
+        }
+        for( int iq = 0; iq < x.num_qpoints(); ++iq ) {
+            for( int mu = 0; mu < lattice->num_modes(); ++mu ) {
+                os_lattice_q_ << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).real()
+                              << std::setw(22) << std::setprecision(12) << x.displacement(iq, mu).imag();
+            }
+        }
+        os_lattice_q_ << std::endl;
+    }
+
+    update_work(time__, energy, power);
     for (auto x : { time__, energy_band, energy_mf, energy - initial_energy_, power, work_, energy - initial_energy_ - work_ }) {
         os_energy_ << std::setw(22) << std::setprecision(12) << x;
     }

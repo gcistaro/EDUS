@@ -109,6 +109,9 @@ class Lattice
         /// e(mu, lambda) of D = M^{-1/2} K M^{-1/2}, for the projection of the dynamics on the modes
         std::vector<double> mode_omega2_;
         mdarray<double, 2> mode_vectors_;
+        /// omega^2 and eigenvectors e(mu, lambda) of D(q) = M^{-1/2} K(q) M^{-1/2} at every q of the grid
+        std::vector<std::vector<double>> mode_omega2_q_;
+        std::vector<mdarray<std::complex<double>, 2>> mode_vectors_q_;
         /// Largest difference between the Hamiltonian of EPW and the one of the tight-binding model (Ha), for the
         /// calculations of the bare and of the screened coupling
         double gauge_check_ = 0.;
@@ -227,6 +230,14 @@ class Lattice
         double energy(const Coordinates& x__) const;
         /// Coordinates, force F__ (the one of force()) and energy of each normal mode of the force constants of ph.x
         ModeProjection project_on_modes(const Coordinates& x__, const std::vector<double>& F__) const;
+        /// Energy (Ha) and number of phonons of each normal mode of K(q) at every q, (iq, lambda)
+        void mode_energies_q(const Coordinates& x__, mdarray<double, 2>& energy__, mdarray<double, 2>& population__) const;
+        /// Frequency (a.u., negative if unstable) of the mode lambda of K(q) at the point iq of the q grid
+        double mode_frequency_q(const int iq__, const int lambda__) const
+        {
+            const double w2 = mode_omega2_q_[iq__][lambda__];
+            return (w2 >= 0. ? 1. : -1.) * std::sqrt(std::abs(w2));
+        }
         /// Frequency (a.u., negative if unstable) and eigenvector e(mu, lambda) of the normal mode lambda of ph.x
         double mode_frequency(const int lambda__) const { return frequencies_input_[lambda__]; }
         double mode_vector(const int mu__, const int lambda__) const { return mode_vectors_(mu__, lambda__); }
@@ -242,6 +253,8 @@ class Lattice
         bool adiabatic_bare() const { return parameters_.screened() && dynamic_reference() && parameters_.adiabatic_bare; }
         int num_modes() const { return num_modes_; }
         int num_qpoints() const { return num_qpoints_; }
+        /// q point iq of the grid, crystal coordinates of the reciprocal lattice
+        const std::array<double, 3>& qpoint(const int iq__) const { return qpoints_[iq__]; }
         const std::vector<double>& mass() const { return mass_; }
         /// Bare coupling g_b of the mode mu__ (force on the lattice)
         const Operator<std::complex<double>>& coupling(const int mu__) const { return coupling_[mu__]; }

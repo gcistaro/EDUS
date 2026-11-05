@@ -157,6 +157,8 @@ class Propagator : public CommutatorEquation
         /// Lattice coupled to the electrons, nullptr without phonons
         const phonon::Lattice* lattice() const { return lattice_; }
         const electron::LocalPotential& local_potential() const { return local_potential_; }
+        /// local index of R = 0 in the R components of the operators with q, -1 if R = 0 is not on this rank
+        int iR0_local() const { return iR0_local_; }
         const parallel::HaloK& halo_k() const { return halo_k_; }
         Processor processor() const { return processor_; }
 };

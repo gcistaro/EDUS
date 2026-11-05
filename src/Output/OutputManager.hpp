@@ -70,6 +70,8 @@ class OutputManager
         BlockMatrix<std::complex<double>> temp_;
         /// Workspace for the energy balance: self energy and its gradient
         Operator<std::complex<double>> sigma_;
+        /// nq > 1: self energy with the q components, for the mean-field energy at all q
+        Operator<std::complex<double>> sigma_q_;
         Operator<std::complex<double>> grad_sigma_;
         /// rho_BO of the static adiabatic reference (with phonons), for the force on the lattice
         Operator<std::complex<double>> rho_bo_;
@@ -102,6 +104,8 @@ class OutputManager
         std::ofstream os_force_check_;
         /// nq > 1: displacements u(q) of all the q points (LatticeQ.txt)
         std::ofstream os_lattice_q_;
+        /// nq > 1: index of -q for every q of the grid
+        std::vector<int> minus_q_;
         std::ofstream os_energy_terms_;
 
         std::string path(const std::string& filename__) const { return parameters_.directory + "/" + filename__; }
@@ -119,6 +123,13 @@ class OutputManager
         /// Velocity (with the self energy and the lattice) in Velocity.txt, energy balance in Energy.txt and
         /// coordinates, forces and energy of the lattice in Lattice.txt
         void print_velocity_energy(const double& time__);
+        /// nq > 1: Energy.txt with all q and the lattice at all q (Lattice.txt, LatticeQ.txt), from the sums of
+        /// print_velocity_energy (local__, already summed over the ranks), the forces at all q and the velocity v__
+        void print_energy_q(const double& time__, const std::array<std::complex<double>, 17>& local__,
+                            const phonon::Lattice::Force& force_full__, const phonon::Lattice::Force& force_bo__,
+                            const std::array<std::complex<double>, 3>& v__, const double num_k__, const double volume__);
+        /// Work of the field W(t) = int P dt (3-point rule), with E(0) at the first call
+        void update_work(const double& time__, const double& energy__, const double& power__);
         void initialize_h5(nlohmann::json dict__, const GridStructure& gridstructure__);
         void write_h5(const double& time__);
 
