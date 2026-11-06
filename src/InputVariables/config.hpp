@@ -561,6 +561,8 @@ class config_t
         std::string adiabatic_coupling() const { return dict_.at("adiabatic_coupling").get<std::string>(); }
         std::vector<double> initial_displacement() const { return dict_.at("initial_displacement").get<std::vector<double>>(); }
         void initial_displacement(std::vector<double> displacement__) { dict_["initial_displacement"] = displacement__; }
+        nlohmann::json initial_displacement_cells() const { return dict_.at("initial_displacement_cells"); }
+        void initial_displacement_cells(nlohmann::json cells__) { dict_["initial_displacement_cells"] = cells__; }
         std::string initial_displacement_units() const { return dict_.at("initial_displacement_units").get<std::string>(); }
         void initial_displacement_units(std::string units__) { dict_["initial_displacement_units"] = units__; }
     };

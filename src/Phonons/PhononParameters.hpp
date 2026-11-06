@@ -75,6 +75,14 @@ struct PhononParameters
     /// Wavevector q0 of the initial displacement (crystal coordinates): u_mu(R) = initial_displacement_mu cos(q0.R),
     /// with R the lattice vector of the cell
     std::array<double, 3> initial_displacement_q = {0., 0., 0.};
+    /// Initial displacement localized on some cells (a.u.): cell R (crystal coordinates) and displacement of its atoms
+    /// (3*atom + direction); the other cells at equilibrium. Alternative to initial_displacement
+    struct DisplacedCell
+    {
+        std::array<int, 3> R = {0, 0, 0};
+        std::vector<double> displacement;
+    };
+    std::vector<DisplacedCell> initial_displacement_cells;
 
     /// True if the screened coupling is given (two calculations of EPW)
     bool screened() const { return !epw_directory_screened.empty(); }
@@ -141,6 +149,19 @@ public:
             throw std::runtime_error("phonons/initial_displacement_q needs 3 crystal coordinates\n");
         }
         p.initial_displacement_q = {q0[0], q0[1], q0[2]};
+        for( auto& cell : cfg.phonons().initial_displacement_cells() ) {
+            PhononParameters::DisplacedCell c;
+            auto R = cell.at("R").get<std::vector<int>>();
+            if( R.size() != 3 ) {
+                throw std::runtime_error("phonons/initial_displacement_cells: R needs 3 crystal coordinates\n");
+            }
+            c.R = {R[0], R[1], R[2]};
+            c.displacement = cell.at("displacement").get<std::vector<double>>();
+            p.initial_displacement_cells.push_back(c);
+        }
+        if( !p.initial_displacement_cells.empty() && !p.initial_displacement.empty() ) {
+            throw std::runtime_error("phonons: initial_displacement and initial_displacement_cells are alternatives\n");
+        }
         p.ifc_file = cfg.phonons().ifc_file();
 
         /* the name of the epmatwp file is prefix.epmatwp: if not given, look for the only one in the directory */

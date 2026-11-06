@@ -402,6 +402,14 @@
                     "default": [],
                     "title": "Initial displacement of the atoms, 3 cartesian components per atom (lattice at rest); empty = equilibrium"
                 },
+                "initial_displacement_cells": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "object"
+                    },
+                    "title": "Initial displacement localized on some cells, alternative to initial_displacement (lattice at rest): list of objects {\"R\": [n1, n2, n3], \"displacement\": [3 cartesian components per atom]}, with R the lattice vector of the cell in crystal coordinates (integers) and displacement in initial_displacement_units. The atoms of the cell R are displaced by displacement, the other cells are at equilibrium. The pattern is periodic on the supercell of the q grid: u_mu(q) = 1/N_q sum_R displacement_mu(R) e^{-iq.R}. E.g. a seed that breaks the symmetry of the crystal for a self-trapped exciton"
+                },
                 "initial_displacement_units": {
                     "type": "string",
                     "default": "angstrom",

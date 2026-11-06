@@ -242,6 +242,14 @@ void Lattice::initialize(const PhononParameters& parameters__, const GridStructu
            << num_modes_ << " (3 per atom)\n";
         throw std::runtime_error(ss.str());
     }
+    for( auto& cell : parameters_.initial_displacement_cells ) {
+        if( int(cell.displacement.size()) != num_modes_ ) {
+            std::stringstream ss;
+            ss << "phonons/initial_displacement_cells: the cell (" << cell.R[0] << ", " << cell.R[1] << ", " << cell.R[2]
+               << ") has " << cell.displacement.size() << " values, expected " << num_modes_ << " (3 per atom)\n";
+            throw std::runtime_error(ss.str());
+        }
+    }
 }
 
 /// @brief Reads the EPW files and puts the coupling g_mu at q = 0 on the grid of the simulation.
@@ -1165,6 +1173,18 @@ void Lattice::initial_condition(Coordinates& x__) const
         else {
             x__.displacement(iq_displacement_plus_, mu) = 0.5 * d;
             x__.displacement(iq_displacement_minus_, mu) = 0.5 * d;
+        }
+    }
+    /* displacement localized on some cells: u_mu(q) = 1/N_q sum_R d_mu(R) e^{-iq.R}, so that sum_q u_mu(q) e^{iq.R}
+       gives back d_mu(R) on the given cells (modulo the supercell of the q grid) and 0 on the others */
+    for( auto& cell : parameters_.initial_displacement_cells ) {
+        for( int iq = 0; iq < num_qpoints(); ++iq ) {
+            const double qR = 2. * M_PI * ( qpoints_[iq][0] * cell.R[0] + qpoints_[iq][1] * cell.R[1]
+                                        + qpoints_[iq][2] * cell.R[2] );
+            const std::complex<double> phase = std::polar(1. / double(num_qpoints()), -qR);
+            for( int mu = 0; mu < num_modes_; ++mu ) {
+                x__.displacement(iq, mu) += cell.displacement[mu] * phase;
+            }
         }
     }
 }

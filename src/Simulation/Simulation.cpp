@@ -170,6 +170,13 @@ void Simulation::convert_input_au()
         x = Convert(x, unit(phonons.initial_displacement_units()), AuLength);
     }
     phonons.initial_displacement(displacement);
+    auto cells = phonons.initial_displacement_cells();
+    for( auto& cell : cells ) {
+        for( auto& x : cell.at("displacement") ) {
+            x = Convert(x.get<double>(), unit(phonons.initial_displacement_units()), AuLength);
+        }
+    }
+    phonons.initial_displacement_cells(cells);
     phonons.initial_displacement_units("aulength");
 }
 
